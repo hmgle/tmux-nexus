@@ -6,12 +6,15 @@ use std::{
     io::{ErrorKind, Write},
     path::PathBuf,
     process::{Command, Stdio},
+    str::FromStr,
 };
 
 use anyhow::{Context, Result};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::{
     tmux,
@@ -65,6 +68,7 @@ struct ManagerConfig {
     session_format: Option<String>,
     window_format: Option<String>,
     pane_format: Option<String>,
+    pane_remote: PaneRemoteMode,
     window_filter: Option<String>,
     menu: Option<String>,
     menu_popup: bool,
@@ -119,6 +123,39 @@ struct PaneEntry {
     session_id: String,
     window_id: String,
     pane_id: String,
+    pane_path: String,
+    host: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum PaneRemoteMode {
+    #[default]
+    Auto,
+    Always,
+    Off,
+}
+
+impl FromStr for PaneRemoteMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "always" => Ok(Self::Always),
+            "off" => Ok(Self::Off),
+            _ => Err("expected auto, always, or off".into()),
+        }
+    }
+}
+
+impl PaneRemoteMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Always => "always",
+            Self::Off => "off",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -252,6 +289,16 @@ impl ManagerConfig {
                 "TNX_MANAGER_PANE_FORMAT",
                 "TMUX_FZF_PANE_FORMAT",
             ),
+            pane_remote: get("pane_remote", "TNX_MANAGER_PANE_REMOTE", "")
+                .map(|value| {
+                    value.parse().map_err(|error: String| {
+                        anyhow::anyhow!(
+                            "invalid manager setting TNX_MANAGER_PANE_REMOTE/manager_pane_remote: {error}"
+                        )
+                    })
+                })
+                .transpose()?
+                .unwrap_or_default(),
             window_filter: get(
                 "window_filter",
                 "TNX_MANAGER_WINDOW_FILTER",
@@ -668,27 +715,158 @@ fn pane_entries(config: &ManagerConfig) -> Result<Vec<PaneEntry>> {
         .as_deref()
         .map(|format| format!("#S:#{{window_index}}.#{{pane_index}}: {format}"))
         .unwrap_or_else(|| "#S:#{window_index}.#{pane_index}: [#{window_name}:#{pane_title}] #{pane_current_command} [#{pane_width}x#{pane_height}] [history #{history_size}/#{history_limit}] #{?pane_active,[active],[inactive]}".into());
-    let output = tmux::stdout([
-        "list-panes",
-        "-a",
-        "-F",
-        &format!("#{{session_id}}\t#{{window_id}}\t#{{pane_id}}\t{display}"),
-    ])?;
-    Ok(output.lines().filter_map(parse_pane_entry).collect())
+    let format = format!(
+        "#{{session_id}}\t#{{window_id}}\t#{{pane_id}}\t#{{pane_path}}\t#{{host}}\t{display}"
+    );
+    let output = tmux::stdout(["list-panes", "-a", "-F", format.as_str()])?;
+    Ok(output
+        .lines()
+        .filter_map(parse_pane_entry)
+        .map(|mut pane| {
+            if let Some(context) =
+                render_pane_context(&pane.pane_path, &pane.host, config.pane_remote)
+            {
+                pane.row.display.push_str(" [");
+                pane.row.display.push_str(&context);
+                pane.row.display.push(']');
+            }
+            pane
+        })
+        .collect())
 }
 
 fn parse_pane_entry(line: &str) -> Option<PaneEntry> {
-    let mut fields = line.splitn(4, '\t');
+    let mut fields = line.splitn(6, '\t');
     let session_id = fields.next()?.to_string();
     let window_id = fields.next()?.to_string();
     let pane_id = fields.next()?.to_string();
+    let pane_path = fields.next().unwrap_or_default().to_string();
+    let host = fields.next().unwrap_or_default().to_string();
     let display = fields.next().unwrap_or_default();
     Some(PaneEntry {
         row: Row::new(&pane_id, display),
         session_id,
         window_id,
         pane_id,
+        pane_path,
+        host,
     })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PanePath<'a> {
+    authority: &'a str,
+    path: &'a str,
+}
+
+fn render_pane_context(pane_path: &str, host: &str, mode: PaneRemoteMode) -> Option<String> {
+    if mode == PaneRemoteMode::Off {
+        return None;
+    }
+
+    let parsed = parse_pane_path(pane_path)?;
+    let local = is_local_authority(parsed.authority, host);
+    if mode == PaneRemoteMode::Auto && local {
+        return None;
+    }
+
+    let path = percent_decode(parsed.path).unwrap_or_else(|| parsed.path.to_string());
+    let context = if parsed.authority.is_empty() {
+        path
+    } else {
+        format!("{}:{}", parsed.authority, path)
+    };
+    Some(truncate_display(&context, 48))
+}
+
+fn parse_pane_path(value: &str) -> Option<PanePath<'_>> {
+    let value = value.strip_prefix("file://")?;
+    let separator = value.find('/')?;
+    Some(PanePath {
+        authority: &value[..separator],
+        path: &value[separator..],
+    })
+}
+
+fn is_local_authority(authority: &str, host: &str) -> bool {
+    let authority = authority.trim_end_matches('.');
+    if authority.is_empty() || authority.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    let host = host.trim_end_matches('.');
+    if host.is_empty() {
+        return false;
+    }
+
+    authority.eq_ignore_ascii_case(host)
+        || short_hostname(authority).eq_ignore_ascii_case(short_hostname(host))
+}
+
+fn short_hostname(host: &str) -> &str {
+    host.split('.').next().unwrap_or(host)
+}
+
+fn percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            output.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+
+        if index + 2 >= bytes.len() {
+            return None;
+        }
+        let high = (bytes[index + 1] as char).to_digit(16)?;
+        let low = (bytes[index + 2] as char).to_digit(16)?;
+        output.push((high * 16 + low) as u8);
+        index += 3;
+    }
+    String::from_utf8(output).ok()
+}
+
+fn truncate_display(value: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(value) <= max_width {
+        return value.to_string();
+    }
+    if max_width <= 3 {
+        return ".".repeat(max_width);
+    }
+
+    let content_width = max_width - 3;
+    let left_width = content_width.div_ceil(2);
+    let right_width = content_width / 2;
+    let left = take_graphemes(value, left_width, false);
+    let right = take_graphemes(value, right_width, true);
+    format!("{left}...{right}")
+}
+
+fn take_graphemes(value: &str, max_width: usize, from_end: bool) -> String {
+    let graphemes: Vec<&str> = value.graphemes(true).collect();
+    let iterator: Box<dyn Iterator<Item = &&str>> = if from_end {
+        Box::new(graphemes.iter().rev())
+    } else {
+        Box::new(graphemes.iter())
+    };
+    let mut selected = Vec::new();
+    let mut width = 0;
+    for grapheme in iterator {
+        let grapheme_width = UnicodeWidthStr::width(*grapheme);
+        if width + grapheme_width > max_width {
+            break;
+        }
+        selected.push(*grapheme);
+        width += grapheme_width;
+    }
+    if from_end {
+        selected.into_iter().rev().collect()
+    } else {
+        selected.concat()
+    }
 }
 
 fn resolve_action(
@@ -987,11 +1165,12 @@ fn destructive_tmux(
 pub fn doctor_summary() -> Result<String> {
     let config = ManagerConfig::load()?;
     Ok(format!(
-        "key={} order={} preview={} confirm={} copyq={} pstree={} privilege={}",
+        "key={} order={} preview={} confirm={} pane_remote={} copyq={} pstree={} privilege={}",
         config.key,
         config.order.join("|"),
         config.preview,
         config.confirm,
+        config.pane_remote.as_str(),
         tmux::have("copyq"),
         tmux::have("pstree"),
         if tmux::have("sudo") {
@@ -1074,8 +1253,17 @@ fn ensure_program(program: &str, message: &str) -> Result<()> {
 mod tests {
     use super::{
         parse_bool, parse_menu, parse_pane_entry, parse_session_entry, parse_window_entry,
-        picker_exit, without_multi, without_popup_options, without_tmux_options, PickerExit,
+        percent_decode, picker_exit, render_pane_context, truncate_display, without_multi,
+        without_popup_options, without_tmux_options, PaneRemoteMode, PickerExit,
     };
+
+    #[test]
+    fn parses_remote_context_modes() {
+        assert_eq!("auto".parse(), Ok(PaneRemoteMode::Auto));
+        assert_eq!("ALWAYS".parse(), Ok(PaneRemoteMode::Always));
+        assert_eq!("off".parse(), Ok(PaneRemoteMode::Off));
+        assert!("sometimes".parse::<PaneRemoteMode>().is_err());
+    }
 
     #[test]
     fn parses_legacy_menu() {
@@ -1163,10 +1351,89 @@ mod tests {
         assert_eq!(window.row.id, "$1:@2");
         assert_eq!(window.row.display, "work:1\tname");
 
-        let pane = parse_pane_entry("$1\t@2\t%3\twork:1.0\ttitle").unwrap();
+        let pane = parse_pane_entry("$1\t@2\t%3\t\tglehost\twork:1.0\ttitle").unwrap();
         assert_eq!(pane.session_id, "$1");
         assert_eq!(pane.window_id, "@2");
         assert_eq!(pane.pane_id, "%3");
         assert_eq!(pane.row.display, "work:1.0\ttitle");
+        assert!(pane.pane_path.is_empty());
+        assert_eq!(pane.host, "glehost");
+    }
+
+    #[test]
+    fn normalizes_remote_pane_paths() {
+        assert_eq!(render_pane_context("", "host", PaneRemoteMode::Auto), None);
+        assert_eq!(
+            render_pane_context("junk; rm -rf /", "host", PaneRemoteMode::Auto),
+            None
+        );
+        assert_eq!(
+            render_pane_context("file://server/path-B", "glehost", PaneRemoteMode::Auto),
+            Some("server:/path-B".into())
+        );
+        assert_eq!(
+            render_pane_context("file://glehost/x", "glehost", PaneRemoteMode::Auto),
+            None
+        );
+        assert_eq!(
+            render_pane_context(
+                "file://glehost.example.com/x",
+                "glehost",
+                PaneRemoteMode::Auto
+            ),
+            None
+        );
+        assert_eq!(
+            render_pane_context(
+                "file://glehost/x",
+                "glehost.example.com",
+                PaneRemoteMode::Auto
+            ),
+            None
+        );
+        assert_eq!(
+            render_pane_context("file:///only/path", "glehost", PaneRemoteMode::Auto),
+            None
+        );
+        assert_eq!(
+            render_pane_context("file://localhost/x", "glehost", PaneRemoteMode::Auto),
+            None
+        );
+        assert_eq!(
+            render_pane_context(
+                "file://srv/a%20b/%E4%B8%AD",
+                "glehost",
+                PaneRemoteMode::Auto
+            ),
+            Some("srv:/a b/中".into())
+        );
+        assert_eq!(
+            render_pane_context("file://srv/a%2", "glehost", PaneRemoteMode::Auto),
+            Some("srv:/a%2".into())
+        );
+        assert_eq!(
+            render_pane_context("file://srv/x", "glehost", PaneRemoteMode::Off),
+            None
+        );
+        assert_eq!(
+            render_pane_context("file://glehost/x", "glehost", PaneRemoteMode::Always),
+            Some("glehost:/x".into())
+        );
+    }
+
+    #[test]
+    fn percent_decoding_rejects_malformed_or_non_utf8_values() {
+        assert_eq!(percent_decode("a%20b/%E4%B8%AD"), Some("a b/中".into()));
+        assert_eq!(percent_decode("trailing%"), None);
+        assert_eq!(percent_decode("bad%zz"), None);
+        assert_eq!(percent_decode("bad%C3%28"), None);
+    }
+
+    #[test]
+    fn truncates_remote_context_by_display_width() {
+        let value = "server:/some/very/long/path/with/a/深い/directory";
+        let truncated = truncate_display(value, 20);
+        assert!(unicode_width::UnicodeWidthStr::width(truncated.as_str()) <= 20);
+        assert!(truncated.contains("..."));
     }
 }

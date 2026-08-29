@@ -78,6 +78,10 @@ tmux -L "$SOCKET" select-pane -t "$pane_one"
 run_manage pane switch
 [ "$(tmux -L "$SOCKET" display-message -p '#{pane_id}')" = "$pane_two" ]
 
+pane_remote="$(tmux -L "$SOCKET" split-window -d -t "$pane_one" -P -F '#{pane_id}' \
+    "env -i /bin/sh -c 'printf \"\\033]7;file://remote.example/path%%20B\\033\\\\\"; sleep 60'")"
+sleep 0.2
+
 tmux -L "$SOCKET" copy-mode -t "$pane_two"
 run_manage copy-mode cancel
 [ "$(tmux -L "$SOCKET" display-message -p -t "$pane_two" '#{pane_in_mode}')" = 0 ]
@@ -91,6 +95,9 @@ TNX_TEST_MATCH="copyq-line-one copyq-line-two" run_manage clipboard system
 sleep 0.1
 tmux -L "$SOCKET" capture-pane -p -t "$pane_two" | grep -Fq copyq-line-one
 test "$(cat "$TMP/copyq.log")" = "$(printf 'count\ncount\nread 0\nread 1\nread 0')"
+
+TNX_TEST_MATCH="remote.example:/path B" run_manage pane switch
+[ "$(tmux -L "$SOCKET" display-message -p '#{pane_id}')" = "$pane_remote" ]
 
 tmux -L "$SOCKET" bind-key -T prefix C-g set-option -g @manager_binding_ran yes
 TNX_TEST_MATCH="@manager_binding_ran" run_manage keybinding

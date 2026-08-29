@@ -217,6 +217,7 @@ Manager settings use `@tmux_nexus_manager_*` tmux options or
 | `confirm` | `1` | confirm destructive actions |
 | `switch_current` | `0` | include the current object in switch lists |
 | `session_format`, `window_format`, `pane_format` | tmux-aware defaults | custom list formats |
+| `pane_remote` | `auto` | append an OSC 7 remote context to pane rows: `auto`, `always`, or `off` |
 | `window_filter` | empty | tmux `list-windows -f` filter |
 | `menu` | empty | legacy-compatible label/command pairs |
 | `menu_popup` | `0` | run menu commands in a popup |
@@ -225,6 +226,95 @@ Manager settings use `@tmux_nexus_manager_*` tmux options or
 For migration, the manager also reads the corresponding `TMUX_FZF_*`
 variables when no new setting is present. The precedence is `TNX_MANAGER_*`,
 tmux option, legacy `TMUX_FZF_*`, then the default.
+
+### Remote pane directories over SSH
+
+The pane picker can show the working directory reported by the application in
+the pane through OSC 7. This is useful for SSH sessions, where
+`#{pane_current_path}` remains the local directory in which `ssh` was started.
+When `#{pane_path}` contains a `file://host/path` URI whose host differs from
+the tmux host, the default `pane_remote=auto` mode appends a compact context such
+as `[server:/path-B]`. The context is part of the fzf display row, so it is
+searchable. Local OSC 7 paths are hidden in `auto` mode; use
+`@tmux_nexus_manager_pane_remote always` to show them or `off` to disable this
+automatic context.
+
+OSC 7 must be emitted by the shell running inside the pane. Configure it on the
+local machine and on remote machines so the value is refreshed after entering
+and leaving SSH. The value updates when a prompt is rendered and may otherwise
+be stale. In particular, if only the remote shell emits OSC 7, the remote path
+can remain visible after SSH exits until the local shell emits its next update.
+
+For bash, the following hook preserves an existing `PROMPT_COMMAND` and URL
+encodes the path:
+
+```bash
+__tmux_nexus_urlencode() {
+    local LC_ALL=C value="$1" out= char i encoded
+    for ((i = 0; i < ${#value}; i++)); do
+        char=${value:i:1}
+        case "$char" in
+            [a-zA-Z0-9.~_-]|/) out+=$char ;;
+            *) printf -v encoded '%%%02X' "'$char"; out+=$encoded ;;
+        esac
+    done
+    printf '%s' "$out"
+}
+
+__tmux_nexus_osc7() {
+    local status=$?
+    printf '\033]7;file://%s%s\033\\' "$HOSTNAME" \
+        "$(__tmux_nexus_urlencode "$PWD")"
+    return "$status"
+}
+
+if declare -p PROMPT_COMMAND 2>/dev/null | grep -q 'declare -a'; then
+    PROMPT_COMMAND+=(__tmux_nexus_osc7)
+else
+    PROMPT_COMMAND="__tmux_nexus_osc7${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+fi
+```
+
+For zsh, install the equivalent hook with `add-zsh-hook`:
+
+```zsh
+autoload -Uz add-zsh-hook
+__tmux_nexus_urlencode() {
+    local LC_ALL=C value="$1" out= char i encoded
+    for ((i = 1; i <= ${#value}; i++)); do
+        char=${value[i]}
+        case "$char" in
+            [a-zA-Z0-9.~_-]|/) out+=$char ;;
+            *) printf -v encoded '%%%02X' "'$char"; out+=$encoded ;;
+        esac
+    done
+    printf '%s' "$out"
+}
+
+__tmux_nexus_osc7() {
+    local status=$?
+    printf '\e]7;file://%s%s\e\\' "$HOST" \
+        "$(__tmux_nexus_urlencode "$PWD")"
+    return "$status"
+}
+add-zsh-hook precmd __tmux_nexus_osc7
+```
+
+Fish and several terminal integrations emit OSC 7 on `fish_prompt` already;
+enable that integration on both sides of an SSH connection if it is disabled.
+The payload should be a percent-encoded `file://host/path` URI.
+
+OSC 7 is application-controlled text. tmux-nexus uses it only for display and
+search; it is never passed to a shell or used as a local working directory.
+Nested tmux sessions consume OSC 7 unless the inner tmux is configured to
+forward it. On tmux 3.3 or newer, opt in with:
+
+```tmux
+set -as terminal-features ',*:osc7'
+```
+
+Only the active pane's path is forwarded by nested tmux. Other terminal
+multiplexers may not forward OSC 7.
 
 Menu entries use the tmux-fzf-compatible format:
 

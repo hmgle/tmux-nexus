@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Manager pane rows can show and search remote working-directory context from
+  OSC 7 (`pane_path`), with automatic host comparison, URI path decoding, and
+  bounded display width. Configure `pane_remote` as `auto`, `always`, or `off`.
+- Documented shell hooks and nested tmux forwarding for OSC 7 SSH directories.
+
 ## [0.7.2] - 2026-07-12
 
 ### Changed
