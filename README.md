@@ -297,10 +297,10 @@ __tmux_nexus_urlencode() {
 }
 
 __tmux_nexus_osc7() {
-    local status=$?
+    local exit_status=$?
     printf '\e]7;file://%s%s\e\\' "$HOST" \
         "$(__tmux_nexus_urlencode "$PWD")"
-    return "$status"
+    return "$exit_status"
 }
 add-zsh-hook precmd __tmux_nexus_osc7
 ```
