@@ -239,6 +239,11 @@ searchable. Local OSC 7 paths are hidden in `auto` mode; use
 `@tmux_nexus_manager_pane_remote always` to show them or `off` to disable this
 automatic context.
 
+The automatic context is appended even when a custom `pane_format` is set. If
+that custom format already includes `#{pane_path}`, the same information can
+appear twice; set `@tmux_nexus_manager_pane_remote off` when the format manages
+remote paths itself.
+
 OSC 7 must be emitted by the shell running inside the pane. Configure it on the
 local machine and on remote machines so the value is refreshed after entering
 and leaving SSH. The value updates when a prompt is rendered and may otherwise

@@ -759,6 +759,8 @@ struct PanePath<'a> {
     path: &'a str,
 }
 
+const REMOTE_CONTEXT_MAX_WIDTH: usize = 48;
+
 fn render_pane_context(pane_path: &str, host: &str, mode: PaneRemoteMode) -> Option<String> {
     if mode == PaneRemoteMode::Off {
         return None;
@@ -776,7 +778,7 @@ fn render_pane_context(pane_path: &str, host: &str, mode: PaneRemoteMode) -> Opt
     } else {
         format!("{}:{}", parsed.authority, path)
     };
-    Some(truncate_display(&context, 48))
+    Some(truncate_display(&context, REMOTE_CONTEXT_MAX_WIDTH))
 }
 
 fn parse_pane_path(value: &str) -> Option<PanePath<'_>> {
@@ -800,7 +802,8 @@ fn is_local_authority(authority: &str, host: &str) -> bool {
     }
 
     authority.eq_ignore_ascii_case(host)
-        || short_hostname(authority).eq_ignore_ascii_case(short_hostname(host))
+        || authority.eq_ignore_ascii_case(short_hostname(host))
+        || short_hostname(authority).eq_ignore_ascii_case(host)
 }
 
 fn short_hostname(host: &str) -> &str {
@@ -819,10 +822,21 @@ fn percent_decode(value: &str) -> Option<String> {
         }
 
         if index + 2 >= bytes.len() {
-            return None;
+            output.push(b'%');
+            index += 1;
+            continue;
         }
-        let high = (bytes[index + 1] as char).to_digit(16)?;
-        let low = (bytes[index + 2] as char).to_digit(16)?;
+
+        let Some(high) = (bytes[index + 1] as char).to_digit(16) else {
+            output.push(b'%');
+            index += 1;
+            continue;
+        };
+        let Some(low) = (bytes[index + 2] as char).to_digit(16) else {
+            output.push(b'%');
+            index += 1;
+            continue;
+        };
         output.push((high * 16 + low) as u8);
         index += 3;
     }
@@ -1392,6 +1406,22 @@ mod tests {
             None
         );
         assert_eq!(
+            render_pane_context(
+                "file://web1.prod.example.com/x",
+                "web1.dev.example.com",
+                PaneRemoteMode::Auto
+            ),
+            Some("web1.prod.example.com:/x".into())
+        );
+        assert_eq!(
+            render_pane_context(
+                "file://dev.customer.example.net/x",
+                "dev.corp.example.com",
+                PaneRemoteMode::Auto
+            ),
+            Some("dev.customer.example.net:/x".into())
+        );
+        assert_eq!(
             render_pane_context("file:///only/path", "glehost", PaneRemoteMode::Auto),
             None
         );
@@ -1422,18 +1452,21 @@ mod tests {
     }
 
     #[test]
-    fn percent_decoding_rejects_malformed_or_non_utf8_values() {
+    fn percent_decoding_preserves_malformed_but_rejects_non_utf8_values() {
         assert_eq!(percent_decode("a%20b/%E4%B8%AD"), Some("a b/中".into()));
-        assert_eq!(percent_decode("trailing%"), None);
-        assert_eq!(percent_decode("bad%zz"), None);
+        assert_eq!(percent_decode("a%20b/100%/c"), Some("a b/100%/c".into()));
+        assert_eq!(percent_decode("trailing%"), Some("trailing%".into()));
+        assert_eq!(percent_decode("bad%zz"), Some("bad%zz".into()));
         assert_eq!(percent_decode("bad%C3%28"), None);
     }
 
     #[test]
     fn truncates_remote_context_by_display_width() {
-        let value = "server:/some/very/long/path/with/a/深い/directory";
-        let truncated = truncate_display(value, 20);
-        assert!(unicode_width::UnicodeWidthStr::width(truncated.as_str()) <= 20);
+        let truncated = truncate_display("0123456789abcdefghijklmnopqrstuvwxyz", 11);
+        assert_eq!(truncated, "0123...wxyz");
+        assert!(unicode_width::UnicodeWidthStr::width(truncated.as_str()) <= 11);
         assert!(truncated.contains("..."));
+        assert_eq!(truncate_display("abcdef", 3), "...");
+        assert_eq!(truncate_display("abcdef", 2), "..");
     }
 }
