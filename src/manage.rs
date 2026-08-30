@@ -772,6 +772,8 @@ fn render_pane_context(pane_path: &str, host: &str, mode: PaneRemoteMode) -> Opt
         return None;
     }
 
+    // Decoding can reintroduce tabs/control characters; the picker sanitizes
+    // row display text before passing it to fzf.
     let path = percent_decode(parsed.path).unwrap_or_else(|| parsed.path.to_string());
     let context = if parsed.authority.is_empty() {
         path
