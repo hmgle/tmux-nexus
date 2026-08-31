@@ -94,6 +94,12 @@ cursor_line="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{copy_cursor_li
 assert_eq "$cursor_line" "-rw-r--r-- query_test.go" "leading-hyphen jump target"
 tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
 
+top_record="$(printf '%s\n' "$full_capture" | awk -F '\t' '$5 == 5 { print; exit }')"
+TNX_TMUX_ARGS="-L $SOCKET" "$BIN" action --action jump --record "$top_record"
+top_cursor="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{copy_cursor_line}')"
+assert_eq "$top_cursor" DUPLICATE "top-of-history jump target"
+tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
+
 colon_pane="$(tmux -L "$SOCKET" new-session -d -x 40 -y 8 -s 'foo:bar' -P -F '#{pane_id}' \
     "bash -lc 'echo colon-target; sleep 60'")"
 wait_for_text "$colon_pane" colon-target
