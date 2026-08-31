@@ -137,6 +137,10 @@ fn signal_processes(
             failures.push(format!("{} changed identity", process.pid));
             continue;
         }
+        if let Err(error) = revalidate_process(process) {
+            failures.push(format!("{}: {error:#}", process.pid));
+            continue;
+        }
         let result: Result<()> = if process.uid == current_uid {
             signal_same_uid(process, signal_number)
         } else if let Some(program) = privilege {
@@ -226,6 +230,20 @@ fn process_start_identity(_pid: u32) -> Option<String> {
     None
 }
 
+fn revalidate_process(process: &ProcessEntry) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let current = process_start_identity(process.pid)
+            .context("process exited during final identity check")?;
+        if current != process.started {
+            anyhow::bail!("process changed identity during final identity check");
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = process;
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 fn signal_same_uid(process: &ProcessEntry, signal_number: i32) -> Result<()> {
     let pid = libc::pid_t::try_from(process.pid)
@@ -234,6 +252,7 @@ fn signal_same_uid(process: &ProcessEntry, signal_number: i32) -> Result<()> {
     if pidfd < 0 {
         let error = std::io::Error::last_os_error();
         if error.raw_os_error() == Some(libc::ENOSYS) {
+            revalidate_process(process)?;
             let status = unsafe { libc::kill(pid, signal_number) };
             return if status == 0 {
                 Ok(())
