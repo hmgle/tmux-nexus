@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without capture wrap flags fall back to text positioning for joined lines.
 - `TNX_LAUNCH_KEY`, `TNX_MOTION_KEY`, and `TNX_MOTION2_KEY` now take precedence
   over their corresponding tmux options when the plugin creates bindings.
-- Process signal fallbacks now perform a final process-start identity check
-  immediately before delivery when Linux pidfds are unavailable.
+- Process signal fallbacks and privilege helpers now perform one final UID and
+  process-start check immediately before delivery. Linux pidfds verify identity
+  after opening to cover reuse before the pidfd became stable.
 - Search filtering now reuses its combined-field buffer across records,
   avoiding a temporary allocation for every regex or separator-aware match.
 - Documentation now matches the ASCII motion-overlay border defaults used by

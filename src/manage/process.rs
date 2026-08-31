@@ -137,21 +137,19 @@ fn signal_processes(
             failures.push(format!("{} changed identity", process.pid));
             continue;
         }
-        if let Err(error) = revalidate_process(process) {
-            failures.push(format!("{}: {error:#}", process.pid));
-            continue;
-        }
         let result: Result<()> = if process.uid == current_uid {
             signal_same_uid(process, signal_number)
         } else if let Some(program) = privilege {
-            match Command::new(program)
-                .args(["kill", "-s", signal_name, &process.pid.to_string()])
-                .status()
-            {
-                Ok(status) if status.success() => Ok(()),
-                Ok(status) => Err(anyhow::anyhow!("{program} exited with status {status}")),
-                Err(error) => Err(error).with_context(|| format!("failed to start {program}")),
-            }
+            revalidate_process(process).and_then(|()| {
+                match Command::new(program)
+                    .args(["kill", "-s", signal_name, &process.pid.to_string()])
+                    .status()
+                {
+                    Ok(status) if status.success() => Ok(()),
+                    Ok(status) => Err(anyhow::anyhow!("{program} exited with status {status}")),
+                    Err(error) => Err(error).with_context(|| format!("failed to start {program}")),
+                }
+            })
         } else {
             Err(anyhow::anyhow!(
                 "install sudo or doas to signal UID {}",
@@ -231,16 +229,13 @@ fn process_start_identity(_pid: u32) -> Option<String> {
 }
 
 fn revalidate_process(process: &ProcessEntry) -> Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        let current = process_start_identity(process.pid)
-            .context("process exited during final identity check")?;
-        if current != process.started {
-            anyhow::bail!("process changed identity during final identity check");
-        }
+    let current = current_process_identities(&[process])?;
+    let identity = current
+        .get(&process.pid)
+        .context("process exited during final identity check")?;
+    if identity.uid != process.uid || identity.started != process.started {
+        anyhow::bail!("process changed identity during final identity check");
     }
-    #[cfg(not(target_os = "linux"))]
-    let _ = process;
     Ok(())
 }
 
@@ -263,6 +258,7 @@ fn signal_same_uid(process: &ProcessEntry, signal_number: i32) -> Result<()> {
         return Err(error).context("failed to open process pidfd");
     }
     let result = (|| {
+        // The pidfd prevents reuse after open; this catches reuse just before it.
         let current = process_start_identity(process.pid)
             .context("process exited while opening its pidfd")?;
         if current != process.started {
@@ -291,6 +287,7 @@ fn signal_same_uid(process: &ProcessEntry, signal_number: i32) -> Result<()> {
 fn signal_same_uid(process: &ProcessEntry, signal_number: i32) -> Result<()> {
     let pid = libc::pid_t::try_from(process.pid)
         .map_err(|_| anyhow::anyhow!("PID is outside the platform range"))?;
+    revalidate_process(process)?;
     let status = unsafe { libc::kill(pid, signal_number) };
     if status == 0 {
         Ok(())
