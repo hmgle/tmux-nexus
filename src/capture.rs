@@ -21,9 +21,21 @@ struct PaneInfo {
     history_size: usize,
 }
 
+#[derive(Debug)]
+struct CapturedLine {
+    text: String,
+    grid_line_index: Option<usize>,
+}
+
+#[derive(Debug)]
+struct CapturedPane {
+    snapshot: PaneSnapshot,
+    grid_line_indices: Vec<Option<usize>>,
+}
+
 pub fn build_index(config: &Config, target_pane: Option<&str>) -> Result<SearchIndex> {
     let panes = list_panes(config.scope, target_pane)?;
-    let snapshots: Vec<PaneSnapshot> = panes
+    let captured: Vec<CapturedPane> = panes
         .par_iter()
         .map(|pane| {
             capture_pane(pane, config)
@@ -32,8 +44,8 @@ pub fn build_index(config: &Config, target_pane: Option<&str>) -> Result<SearchI
         .collect::<Result<Vec<_>>>()?;
 
     let mut records = Vec::new();
-    for (pane_index, pane) in snapshots.iter().enumerate() {
-        for (line_index, line) in pane.lines.iter().enumerate() {
+    for (pane_index, pane) in captured.iter().enumerate() {
+        for (line_index, line) in pane.snapshot.lines.iter().enumerate() {
             if config.skip_blank && line.trim().is_empty() {
                 continue;
             }
@@ -41,9 +53,12 @@ pub fn build_index(config: &Config, target_pane: Option<&str>) -> Result<SearchI
             records.push(Record {
                 pane_index,
                 line_index,
+                grid_line_index: pane.grid_line_indices[line_index],
             });
         }
     }
+
+    let snapshots = captured.into_iter().map(|pane| pane.snapshot).collect();
 
     Ok(SearchIndex {
         version: INDEX_VERSION,
@@ -59,9 +74,9 @@ pub fn write_legacy_tsv(
 ) -> Result<()> {
     let panes = list_panes(config.scope, target_pane)?;
     for pane in &panes {
-        let output = capture_pane_output(pane, config)
+        let lines = capture_pane_lines(pane, config)
             .with_context(|| format!("failed to capture pane {}", pane.pane_id))?;
-        write_legacy_pane(writer, pane, config, &output)?;
+        write_legacy_pane(writer, pane, config, &lines)?;
     }
     Ok(())
 }
@@ -117,15 +132,16 @@ fn write_legacy_pane(
     writer: &mut impl Write,
     pane: &PaneInfo,
     config: &Config,
-    output: &str,
+    lines: &[CapturedLine],
 ) -> Result<()> {
     let location = pane_location(pane);
     let line_offset = history_start_line(pane, config);
 
-    for (line_index, line) in output.lines().enumerate() {
-        if config.skip_blank && line.trim().is_empty() {
+    for (line_index, line) in lines.iter().enumerate() {
+        if config.skip_blank && line.text.trim().is_empty() {
             continue;
         }
+        let raw_line_index = line.grid_line_index.unwrap_or(line_index);
 
         writeln!(
             writer,
@@ -134,31 +150,92 @@ fn write_legacy_pane(
             location,
             pane.command,
             pane.window_name,
-            line_offset + line_index + 1,
-            line.trim_end_matches('\r')
+            line_offset + raw_line_index + 1,
+            line.text
         )?;
     }
     Ok(())
 }
 
-fn capture_pane(pane: &PaneInfo, config: &Config) -> Result<PaneSnapshot> {
-    let output = capture_pane_output(pane, config)?;
-    let lines = output.lines().map(ToOwned::to_owned).collect();
+fn capture_pane(pane: &PaneInfo, config: &Config) -> Result<CapturedPane> {
+    let captured = capture_pane_lines(pane, config)?;
+    let grid_line_indices = captured.iter().map(|line| line.grid_line_index).collect();
+    let lines = captured.into_iter().map(|line| line.text).collect();
 
-    Ok(PaneSnapshot {
-        location: pane_location(pane),
-        pane_id: pane.pane_id.clone(),
-        command: pane.command.clone(),
-        window_name: pane.window_name.clone(),
-        history_start_line: history_start_line(pane, config),
-        lines,
+    Ok(CapturedPane {
+        snapshot: PaneSnapshot {
+            location: pane_location(pane),
+            pane_id: pane.pane_id.clone(),
+            command: pane.command.clone(),
+            window_name: pane.window_name.clone(),
+            history_start_line: history_start_line(pane, config),
+            lines,
+        },
+        grid_line_indices,
     })
 }
 
-fn capture_pane_output(pane: &PaneInfo, config: &Config) -> Result<String> {
-    let mut args = vec!["capture-pane".to_string(), "-p".to_string()];
+fn capture_pane_lines(pane: &PaneInfo, config: &Config) -> Result<Vec<CapturedLine>> {
     if config.join_wraps {
+        if let Ok(output) = capture_pane_output(pane, config, false, true) {
+            if let Some(lines) = parse_flagged_capture(&output) {
+                return Ok(lines);
+            }
+        }
+    }
+
+    let output = capture_pane_output(pane, config, config.join_wraps, false)?;
+    Ok(output
+        .lines()
+        .enumerate()
+        .map(|(line_index, line)| CapturedLine {
+            text: line.trim_end_matches('\r').to_string(),
+            grid_line_index: (!config.join_wraps).then_some(line_index),
+        })
+        .collect())
+}
+
+fn parse_flagged_capture(output: &str) -> Option<Vec<CapturedLine>> {
+    let mut lines = Vec::new();
+    let mut pending: Option<CapturedLine> = None;
+
+    for (grid_line_index, line) in output.lines().enumerate() {
+        let (flags, text) = line.trim_end_matches('\r').split_once(' ')?;
+        if flags.is_empty()
+            || !flags
+                .chars()
+                .all(|flag| flag == '-' || flag.is_ascii_uppercase())
+        {
+            return None;
+        }
+
+        let current = pending.get_or_insert_with(|| CapturedLine {
+            text: String::new(),
+            grid_line_index: Some(grid_line_index),
+        });
+        current.text.push_str(text);
+        if !flags.contains('W') {
+            lines.push(pending.take().expect("pending capture line exists"));
+        }
+    }
+    if let Some(line) = pending {
+        lines.push(line);
+    }
+    Some(lines)
+}
+
+fn capture_pane_output(
+    pane: &PaneInfo,
+    config: &Config,
+    join_wraps: bool,
+    include_flags: bool,
+) -> Result<String> {
+    let mut args = vec!["capture-pane".to_string(), "-p".to_string()];
+    if join_wraps {
         args.push("-J".to_string());
+    }
+    if include_flags {
+        args.push("-F".to_string());
     }
     if config.include_history {
         args.extend([
@@ -196,7 +273,10 @@ fn history_start_line(pane: &PaneInfo, config: &Config) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{history_start, history_start_line, write_legacy_pane, PaneInfo};
+    use super::{
+        history_start, history_start_line, parse_flagged_capture, write_legacy_pane, CapturedLine,
+        PaneInfo,
+    };
     use crate::{
         config::Config,
         types::{ActionKind, CaseMode, Scope, SearchMode},
@@ -277,16 +357,41 @@ mod tests {
     #[test]
     fn legacy_tsv_keeps_raw_line_numbers_when_skipping_blanks() {
         let mut output = Vec::new();
-        write_legacy_pane(
-            &mut output,
-            &pane(1300),
-            &config(Some(100)),
-            "alpha\n\nbeta\n",
-        )
-        .unwrap();
+        let lines = [
+            CapturedLine {
+                text: "alpha".into(),
+                grid_line_index: Some(0),
+            },
+            CapturedLine {
+                text: String::new(),
+                grid_line_index: Some(1),
+            },
+            CapturedLine {
+                text: "beta".into(),
+                grid_line_index: Some(2),
+            },
+        ];
+        write_legacy_pane(&mut output, &pane(1300), &config(Some(100)), &lines).unwrap();
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "%1\ts:1.0\tzsh\tmain\t1201\talpha\n%1\ts:1.0\tzsh\tmain\t1203\tbeta\n"
         );
+    }
+
+    #[test]
+    fn flagged_capture_joins_text_but_preserves_grid_coordinates() {
+        let lines = parse_flagged_capture(
+            "- before\nW 012345678901234567890123456789\n- -IN-A-NARROW-PANE\n- after\n",
+        )
+        .unwrap();
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            lines[1].text,
+            "012345678901234567890123456789-IN-A-NARROW-PANE"
+        );
+        assert_eq!(lines[1].grid_line_index, Some(1));
+        assert_eq!(lines[2].text, "after");
+        assert_eq!(lines[2].grid_line_index, Some(3));
     }
 }

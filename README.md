@@ -368,7 +368,8 @@ picker would capture and index more scrollback than needed.
 1. `capture` lists panes in scope and captures them in parallel, using
    `history_lines` when a scrollback limit is configured.
 2. The Rust backend builds a structured temporary index: pane snapshots plus
-   record IDs for searchable lines.
+   record IDs for searchable lines. Joined wrapped text retains the physical
+   grid coordinate used by tmux copy mode.
 3. Search filters the in-memory index using literal matching by default, or
    regex matching with `--regex`.
 4. fzf displays compact rows while preview and actions resolve the selected
@@ -376,6 +377,12 @@ picker would capture and index more scrollback than needed.
 5. Actions call tmux directly to jump, copy, send, or print. Jump actions
    translate the snapshot's absolute history line into tmux copy-mode's
    bottom-relative position, avoiding ambiguity when text is duplicated.
+
+Exact positions reflect the pane geometry captured when the picker opens.
+Output appended afterward does not shift those coordinates, but scrollback
+truncation or a resize that reflows wrapped lines before selection can invalidate
+the snapshot. On tmux versions before 3.7, joined wrapped lines use text-based
+positioning because capture wrap flags are unavailable.
 
 Motion mode uses a separate visible-screen path. It lists the panes in the
 current tmux window once, starts their independent `capture-pane` commands

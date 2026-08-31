@@ -7,12 +7,13 @@ use crate::{
     index::{LegacyRecord, SearchIndex},
     tmux,
     types::ActionKind,
-    util::trim_prefix_chars,
+    util::{trim_prefix_chars, version_at_least},
 };
 
 struct ActionTarget<'a> {
     pane_id: &'a str,
     raw_line_no: usize,
+    exact_line_no: Option<usize>,
     text: &'a str,
 }
 
@@ -31,26 +32,37 @@ pub fn execute(
     let text = index
         .text_for(record)
         .context("text not found for record")?;
-    let history_line_no = history_line_no(pane.history_start_line, record.raw_line_no());
+    let raw_line_no = history_line_no(pane.history_start_line, record.raw_line_no());
+    let exact_line_no = record
+        .grid_line_no()
+        .map(|line_no| history_line_no(pane.history_start_line, line_no));
     perform(
         action,
         &ActionTarget {
             pane_id: &pane.pane_id,
-            raw_line_no: history_line_no,
+            raw_line_no,
+            exact_line_no,
             text,
         },
     )
 }
 
-pub fn execute_legacy(record: &LegacyRecord, action: ActionKind) -> Result<()> {
+pub fn execute_legacy(record: &LegacyRecord, action: ActionKind, config: &Config) -> Result<()> {
+    let exact_line_no = (!config.join_wraps || capture_flags_supported()).then_some(record.line_no);
     perform(
         action,
         &ActionTarget {
             pane_id: &record.pane_id,
             raw_line_no: record.line_no,
+            exact_line_no,
             text: &record.text,
         },
     )
+}
+
+fn capture_flags_supported() -> bool {
+    let version = tmux::command_version("tmux", &["-V"]).unwrap_or_default();
+    version_at_least(&version, 3, 7, 0)
 }
 
 fn perform(action: ActionKind, target: &ActionTarget<'_>) -> Result<()> {
@@ -78,10 +90,13 @@ fn jump(target: &ActionTarget<'_>) -> Result<()> {
     ]) {
         tmux::run_ignore(["switch-client", "-t", session_id.as_str()]);
     }
+    tmux::run(["select-window", "-t", target.pane_id]).context("failed to select target window")?;
     tmux::run(["select-pane", "-t", target.pane_id]).context("failed to select target pane")?;
     tmux::run(["copy-mode", "-t", target.pane_id]).context("failed to enter copy mode")?;
 
-    if let Some(position) = exact_copy_position(target.pane_id, target.raw_line_no) {
+    if let Some((exact_line_no, position)) = target.exact_line_no.and_then(|line_no| {
+        exact_copy_position(target.pane_id, line_no).map(|position| (line_no, position))
+    }) {
         let line = position.goto_line.to_string();
         tmux::run([
             "send-keys",
@@ -95,7 +110,7 @@ fn jump(target: &ActionTarget<'_>) -> Result<()> {
         if position.goto_line > position.history_size {
             tmux::run(["send-keys", "-t", target.pane_id, "-X", "history-top"])
                 .context("failed to move to history start")?;
-            let cursor_down = target.raw_line_no.saturating_sub(1);
+            let cursor_down = exact_line_no.saturating_sub(1);
             if cursor_down > 0 {
                 let count = cursor_down.to_string();
                 tmux::run([
@@ -182,7 +197,10 @@ fn copy_line_from_bounds(
     history_line_no: usize,
 ) -> Option<usize> {
     let last_line = history_size.checked_add(pane_height)?;
-    (history_line_no > 0 && history_line_no < last_line).then_some(last_line - history_line_no)
+    if history_line_no == 0 {
+        return None;
+    }
+    last_line.checked_sub(history_line_no)
 }
 
 fn history_line_no(history_start_line: usize, raw_line_no: usize) -> usize {
@@ -263,6 +281,7 @@ mod tests {
     fn exact_copy_line_counts_from_the_bottom() {
         assert_eq!(copy_line_from_bounds(23, 8, 20), Some(11));
         assert_eq!(copy_line_from_bounds(23, 8, 30), Some(1));
-        assert_eq!(copy_line_from_bounds(23, 8, 31), None);
+        assert_eq!(copy_line_from_bounds(23, 8, 31), Some(0));
+        assert_eq!(copy_line_from_bounds(23, 8, 32), None);
     }
 }

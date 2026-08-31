@@ -200,6 +200,7 @@ mod tests {
             records: vec![Record {
                 pane_index: 0,
                 line_index: 0,
+                grid_line_index: Some(0),
             }],
         }
     }
@@ -218,6 +219,7 @@ mod tests {
             records: vec![Record {
                 pane_index: 0,
                 line_index: 0,
+                grid_line_index: Some(0),
             }],
         }
     }

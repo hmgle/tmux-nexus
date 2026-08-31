@@ -73,7 +73,7 @@ assert_num_eq() {
 
 pane="$(tmux -L "$SOCKET" -f /dev/null new-session -d -x 50 -y 8 -s review \
     -P -F '#{pane_id}' \
-    "bash -lc 'for i in \$(seq 1 40); do case \"\$i\" in 5|36|40) echo DUPLICATE ;; 20) echo \"-rw-r--r-- query_test.go\" ;; *) echo hist-\$i ;; esac; done; echo visible-a; echo DUPLICATE; echo visible-z; sleep 60'")"
+    "bash -c 'for i in \$(seq 1 40); do case \"\$i\" in 5|36|40) echo DUPLICATE ;; 20) echo \"-rw-r--r-- query_test.go\" ;; *) echo hist-\$i ;; esac; done; echo visible-a; echo DUPLICATE; echo visible-z; sleep 60'")"
 wait_for_text "$pane" visible-z
 history_size="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{history_size}')"
 
@@ -89,9 +89,13 @@ tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
 full_capture="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane -t "$pane")"
 hyphen_record="$(printf '%s\n' "$full_capture" |
     awk -F '\t' '$6 == "-rw-r--r-- query_test.go" { print; exit }')"
+other_pane="$(tmux -L "$SOCKET" new-window -d -t review: -P -F '#{pane_id}' 'sleep 60')"
+tmux -L "$SOCKET" select-window -t "$other_pane"
 TNX_TMUX_ARGS="-L $SOCKET" "$BIN" action --action jump --record "$hyphen_record"
 cursor_line="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{copy_cursor_line}')"
 assert_eq "$cursor_line" "-rw-r--r-- query_test.go" "leading-hyphen jump target"
+window_active="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{window_active}')"
+assert_num_eq "$window_active" 1 "cross-window jump activates target window"
 tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
 
 top_record="$(printf '%s\n' "$full_capture" | awk -F '\t' '$5 == 5 { print; exit }')"
@@ -100,8 +104,16 @@ top_cursor="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{copy_cursor_lin
 assert_eq "$top_cursor" DUPLICATE "top-of-history jump target"
 tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
 
+bottom_record="$(TNX_TMUX_ARGS="-L $SOCKET" TNX_SKIP_BLANK=0 "$BIN" capture \
+    --scope pane --no-history -t "$pane" | tail -n 1)"
+TNX_TMUX_ARGS="-L $SOCKET" TNX_SKIP_BLANK=0 "$BIN" action --action jump \
+    --record "$bottom_record"
+bottom_scroll="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{scroll_position}')"
+assert_num_eq "$bottom_scroll" 0 "bottom-line jump position"
+tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
+
 colon_pane="$(tmux -L "$SOCKET" new-session -d -x 40 -y 8 -s 'foo:bar' -P -F '#{pane_id}' \
-    "bash -lc 'echo colon-target; sleep 60'")"
+    "bash -c 'echo colon-target; sleep 60'")"
 wait_for_text "$colon_pane" colon-target
 colon_record="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane --no-history -t "$colon_pane" |
     awk -F '\t' '$6 == "colon-target" { print; exit }')"
@@ -116,12 +128,18 @@ first_line="$(printf '%s\n' "$limited_capture" | awk -F '\t' 'NR == 1 {print $5}
 expected_first=$((history_size - 5 + 1))
 assert_num_eq "$first_line" "$expected_first" "limited capture first line"
 
-wrapped_pane="$(tmux -L "$SOCKET" new-session -d -x 10 -y 8 -s wrapped -P -F '#{pane_id}' \
-    "bash -lc 'printf \"wrapped-target-long\\n\"; sleep 60'")"
-wait_for_text "$wrapped_pane" wrapped-target-long
-wrapped_result="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" search --scope pane -t "$wrapped_pane" \
-    --print wrapped-target-long)"
-assert_eq "$wrapped_result" wrapped-target-long "wrapped-line search result"
+wrapped_command="printf '%b' 'before\\n012345678901234567890123456789-IN-A-NARROW-PANE\\nafter-wrap-b\\nend\\n'; sleep 60"
+wrapped_pane="$(tmux -L "$SOCKET" new-session -d -x 30 -y 8 -s wrapped -P -F '#{pane_id}' \
+    bash -c "$wrapped_command")"
+wait_for_text "$wrapped_pane" after-wrap-b
+wrapped_capture="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane --no-history \
+    -t "$wrapped_pane")"
+wrapped_record="$(printf '%s\n' "$wrapped_capture" |
+    awk -F '\t' '$6 == "after-wrap-b" { print; exit }')"
+TNX_TMUX_ARGS="-L $SOCKET" "$BIN" action --action jump --record "$wrapped_record"
+wrapped_cursor="$(tmux -L "$SOCKET" display-message -p -t "$wrapped_pane" '#{copy_cursor_line}')"
+assert_eq "$wrapped_cursor" after-wrap-b "wrapped-line jump target"
+tmux -L "$SOCKET" send-keys -t "$wrapped_pane" -X cancel
 
 mkdir -p "$TMP/fake-bin"
 cat > "$TMP/fake-bin/tmux" <<'EOF'

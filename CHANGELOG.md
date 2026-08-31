@@ -12,11 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assigning zsh's read-only `status` parameter.
 - Installer archives now reject symlinks, hard links, and other non-regular
   members before executable extraction.
-- Jump actions now target the selected absolute history line instead of relying
-  on the nearest matching text, and session names containing `:` are handled
-  without target parsing ambiguity.
-- The tmux plugin binding now honors `TNX_LAUNCH_KEY`, `TNX_MOTION_KEY`, and
-  `TNX_MOTION2_KEY` when their corresponding tmux options are unset.
+- Jump actions now retain physical grid coordinates when wrapped text is joined,
+  activate the target pane's window, include the bottom grid line, and handle
+  session names containing `:` without target parsing ambiguity. tmux versions
+  without capture wrap flags fall back to text positioning for joined lines.
+- `TNX_LAUNCH_KEY`, `TNX_MOTION_KEY`, and `TNX_MOTION2_KEY` now take precedence
+  over their corresponding tmux options when the plugin creates bindings.
 - Process signal fallbacks now perform a final process-start identity check
   immediately before delivery when Linux pidfds are unavailable.
 - Search filtering now reuses its combined-field buffer across records,

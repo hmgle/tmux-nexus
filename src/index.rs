@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-pub const INDEX_VERSION: u32 = 2;
+pub const INDEX_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PaneSnapshot {
@@ -30,11 +30,16 @@ impl PaneSnapshot {
 pub struct Record {
     pub pane_index: usize,
     pub line_index: usize,
+    pub grid_line_index: Option<usize>,
 }
 
 impl Record {
     pub fn raw_line_no(&self) -> usize {
-        self.line_index + 1
+        self.grid_line_index.unwrap_or(self.line_index) + 1
+    }
+
+    pub fn grid_line_no(&self) -> Option<usize> {
+        self.grid_line_index.map(|index| index + 1)
     }
 }
 
@@ -170,6 +175,7 @@ mod tests {
             records: vec![Record {
                 pane_index: 0,
                 line_index: 0,
+                grid_line_index: Some(0),
             }],
             ..SearchIndex::default()
         };
@@ -203,6 +209,7 @@ mod tests {
             records: vec![Record {
                 pane_index: 0,
                 line_index: 24,
+                grid_line_index: Some(24),
             }],
             ..SearchIndex::default()
         };

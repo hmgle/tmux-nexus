@@ -318,7 +318,7 @@ fn run_action(args: ActionArgs) -> Result<()> {
 
     if let Some(raw) = args.legacy_record.as_deref() {
         let record = index::LegacyRecord::parse(raw).context("malformed legacy record")?;
-        return action::execute_legacy(&record, action);
+        return action::execute_legacy(&record, action, &config);
     }
 
     anyhow::bail!("action requires --index + --record-id or --record");
