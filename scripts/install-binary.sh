@@ -163,14 +163,34 @@ else
     echo "install-binary: archive contains an unsafe path." >&2
     exit 1
 fi
+if ! tar -tvzf "$tmp/$asset" > "$tmp/archive.details"; then
+    echo "install-binary: failed to inspect archive member types." >&2
+    exit 1
+fi
+if awk '$1 !~ /^[-d][rwxXsStT-]{9}$/ { bad = 1 } END { exit bad }' \
+    "$tmp/archive.details"; then
+    :
+else
+    echo "install-binary: archive contains a non-regular member." >&2
+    exit 1
+fi
 if ! tar -xzf "$tmp/$asset" -C "$tmp"; then
     echo "install-binary: failed to extract $asset." >&2
     exit 1
 fi
 
 # The tarball format is fixed by release.yml.
-src="$tmp/tnx-${target}/tnx"
-if [ ! -f "$src" ]; then
+archive_root="$tmp/tnx-${target}"
+if [ -L "$archive_root" ] || [ ! -d "$archive_root" ]; then
+    echo "install-binary: archive root is not a directory." >&2
+    exit 1
+fi
+if find "$archive_root" -type l -print -quit | grep -q .; then
+    echo "install-binary: archive contains a symbolic link." >&2
+    exit 1
+fi
+src="$archive_root/tnx"
+if [ -L "$src" ] || [ ! -f "$src" ]; then
     echo "install-binary: 'tnx' not found inside the archive." >&2
     exit 1
 fi

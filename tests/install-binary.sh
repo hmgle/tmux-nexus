@@ -52,6 +52,33 @@ wait "$first"
 wait "$second"
 [ "$("$repo/bin/tnx" --version)" = "tnx 0.5.0" ]
 
+rm -f "$repo/bin/tnx" "$assets/$asset" "$assets/$asset.sha256"
+outside="$TMP/outside"
+mkdir -p "$outside"
+printf '%s\n' '#!/bin/sh' 'echo "unexpected binary"' > "$outside/evil"
+rm -f "$dist/tnx"
+ln -s "$outside/evil" "$dist/tnx"
+tar -czf "$assets/$asset" -C "$TMP" "tnx-${target}"
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$assets/$asset" > "$assets/$asset.sha256"
+else
+    shasum -a 256 "$assets/$asset" > "$assets/$asset.sha256"
+fi
+if env "${install_env[@]}" bash "$repo/scripts/install-binary.sh" --force >/dev/null 2>&1; then
+    echo "installer test: symbolic-link archive unexpectedly succeeded" >&2
+    exit 1
+fi
+[ ! -e "$repo/bin/tnx" ]
+rm -f "$dist/tnx" "$assets/$asset" "$assets/$asset.sha256"
+printf '%s\n' '#!/bin/sh' 'echo "tnx 0.5.0"' > "$dist/tnx"
+chmod +x "$dist/tnx"
+tar -czf "$assets/$asset" -C "$TMP" "tnx-${target}"
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$assets/$asset" > "$assets/$asset.sha256"
+else
+    shasum -a 256 "$assets/$asset" > "$assets/$asset.sha256"
+fi
+
 rm -f "$repo/bin/tnx" "$assets/$asset.sha256"
 if env "${install_env[@]}" bash "$repo/scripts/install-binary.sh" --force >/dev/null 2>&1; then
     echo "installer test: missing checksum unexpectedly succeeded" >&2
