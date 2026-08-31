@@ -132,6 +132,10 @@ wrapped_command="printf '%b' 'before\\n012345678901234567890123456789-IN-A-NARRO
 wrapped_pane="$(tmux -L "$SOCKET" new-session -d -x 30 -y 8 -s wrapped -P -F '#{pane_id}' \
     bash -c "$wrapped_command")"
 wait_for_text "$wrapped_pane" after-wrap-b
+wrapped_result="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" search --scope pane -t "$wrapped_pane" \
+    --print NARROW-PANE)"
+assert_eq "$wrapped_result" "012345678901234567890123456789-IN-A-NARROW-PANE" \
+    "joined wrapped-line search result"
 wrapped_capture="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane --no-history \
     -t "$wrapped_pane")"
 wrapped_record="$(printf '%s\n' "$wrapped_capture" |
