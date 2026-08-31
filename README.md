@@ -381,7 +381,9 @@ picker would capture and index more scrollback than needed.
 Exact positions reflect the pane geometry captured when the picker opens.
 Output appended afterward does not shift those coordinates, but scrollback
 truncation or a resize that reflows wrapped lines before selection can invalidate
-the snapshot. On tmux versions before 3.7, joined wrapped lines use text-based
+the snapshot. tmux copy mode scrolls without moving the cursor row, so jumps
+scroll relative to the row the pane is already using and then walk the remaining
+rows. On tmux versions before 3.7, joined wrapped lines use text-based
 positioning because capture wrap flags are unavailable.
 
 Motion mode uses a separate visible-screen path. It lists the panes in the
