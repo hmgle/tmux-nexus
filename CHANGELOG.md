@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   activate the target pane's window, include the bottom grid line, and handle
   session names containing `:` without target parsing ambiguity. tmux versions
   without capture wrap flags fall back to text positioning for joined lines.
+- Jump actions no longer assume the target pane's cursor is on its last row.
+  tmux copy mode only scrolls for `goto-line`, so panes left with the cursor
+  higher up landed short by the difference.
+- Joining wrapped lines now keeps the spaces at a wrap boundary, which flag
+  captures previously trimmed before the segments were joined.
 - `TNX_LAUNCH_KEY`, `TNX_PANE_KEY`, `TNX_MOTION_KEY`, and `TNX_MOTION2_KEY` now
   take precedence over their corresponding tmux options when the plugin creates
   bindings.

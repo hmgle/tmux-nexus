@@ -110,7 +110,28 @@ TNX_TMUX_ARGS="-L $SOCKET" TNX_SKIP_BLANK=0 "$BIN" action --action jump \
     --record "$bottom_record"
 bottom_scroll="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{scroll_position}')"
 assert_num_eq "$bottom_scroll" 0 "bottom-line jump position"
+bottom_cursor="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{copy_cursor_y}')"
+assert_num_eq "$bottom_cursor" 7 "bottom-line jump cursor row"
 tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
+
+# tmux only scrolls for `goto-line`; it leaves the cursor on the row the pane
+# was using, so a pane whose cursor sits above the last row must still land
+# exactly. The escape moves the cursor without disturbing the scrollback.
+raised_command="for i in \$(seq 1 100); do echo raised-\$i; done; printf '\\033[3;1H'; sleep 60"
+raised_pane="$(tmux -L "$SOCKET" new-session -d -x 40 -y 8 -s raised -P -F '#{pane_id}' \
+    bash -c "$raised_command")"
+wait_for_text "$raised_pane" raised-100
+raised_cursor_y="$(tmux -L "$SOCKET" display-message -p -t "$raised_pane" '#{cursor_y}')"
+assert_num_eq "$raised_cursor_y" 2 "raised pane cursor row"
+raised_capture="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane -t "$raised_pane")"
+for raised_target in raised-1 raised-50 raised-96 raised-100; do
+    raised_record="$(printf '%s\n' "$raised_capture" |
+        awk -F '\t' -v want="$raised_target" '$6 == want { print; exit }')"
+    TNX_TMUX_ARGS="-L $SOCKET" "$BIN" action --action jump --record "$raised_record"
+    raised_line="$(tmux -L "$SOCKET" display-message -p -t "$raised_pane" '#{copy_cursor_line}')"
+    assert_eq "$raised_line" "$raised_target" "raised-cursor jump target $raised_target"
+    tmux -L "$SOCKET" send-keys -t "$raised_pane" -X cancel
+done
 
 colon_pane="$(tmux -L "$SOCKET" new-session -d -x 40 -y 8 -s 'foo:bar' -P -F '#{pane_id}' \
     "bash -c 'echo colon-target; sleep 60'")"
@@ -144,6 +165,16 @@ TNX_TMUX_ARGS="-L $SOCKET" "$BIN" action --action jump --record "$wrapped_record
 wrapped_cursor="$(tmux -L "$SOCKET" display-message -p -t "$wrapped_pane" '#{copy_cursor_line}')"
 assert_eq "$wrapped_cursor" after-wrap-b "wrapped-line jump target"
 tmux -L "$SOCKET" send-keys -t "$wrapped_pane" -X cancel
+
+# A wrap boundary can land on trailing spaces, which become interior spaces once
+# the segments are joined.
+padded_command="printf '%b' 'aaaaaaaaaaaaaaa     bbb\\n'; sleep 60"
+padded_pane="$(tmux -L "$SOCKET" new-session -d -x 20 -y 6 -s padded -P -F '#{pane_id}' \
+    bash -c "$padded_command")"
+wait_for_text "$padded_pane" bbb
+padded_result="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" search --scope pane -t "$padded_pane" \
+    --print 'aaaaaaaaaaaaaaa     bbb')"
+assert_eq "$padded_result" "aaaaaaaaaaaaaaa     bbb" "wrap boundary keeps trailing spaces"
 
 mkdir -p "$TMP/fake-bin"
 cat > "$TMP/fake-bin/tmux" <<'EOF'
