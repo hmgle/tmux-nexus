@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Installer archives now reject symlinks, hard links, and other non-regular
   members before executable extraction.
 - Jump actions now target the selected absolute history line instead of relying
-  on the nearest matching text, and session names containing `:` are parsed
-  correctly.
+  on the nearest matching text, and session names containing `:` are handled
+  without target parsing ambiguity.
 - The tmux plugin binding now honors `TNX_LAUNCH_KEY`, `TNX_MOTION_KEY`, and
   `TNX_MOTION2_KEY` when their corresponding tmux options are unset.
 - Process signal fallbacks now perform a final process-start identity check

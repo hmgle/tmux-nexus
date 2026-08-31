@@ -94,6 +94,16 @@ cursor_line="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{copy_cursor_li
 assert_eq "$cursor_line" "-rw-r--r-- query_test.go" "leading-hyphen jump target"
 tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
 
+colon_pane="$(tmux -L "$SOCKET" new-session -d -x 40 -y 8 -s 'foo:bar' -P -F '#{pane_id}' \
+    "bash -lc 'echo colon-target; sleep 60'")"
+wait_for_text "$colon_pane" colon-target
+colon_record="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane --no-history -t "$colon_pane" |
+    awk -F '\t' '$6 == "colon-target" { print; exit }')"
+TNX_TMUX_ARGS="-L $SOCKET" "$BIN" action --action jump --record "$colon_record"
+colon_cursor="$(tmux -L "$SOCKET" display-message -p -t "$colon_pane" '#{copy_cursor_line}')"
+assert_eq "$colon_cursor" colon-target "colon session jump target"
+tmux -L "$SOCKET" send-keys -t "$colon_pane" -X cancel
+
 limited_capture="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane \
     --history-lines 5 -t "$pane")"
 first_line="$(printf '%s\n' "$limited_capture" | awk -F '\t' 'NR == 1 {print $5}')"
