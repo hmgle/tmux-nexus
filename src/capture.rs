@@ -235,7 +235,9 @@ fn capture_pane_output(
         args.push("-J".to_string());
     }
     if include_flags {
-        args.push("-F".to_string());
+        // `-J` implies `-N` and `-T`; match it so a wrap boundary that falls on
+        // trailing spaces keeps them once the segments are joined.
+        args.extend(["-F".to_string(), "-N".to_string(), "-T".to_string()]);
     }
     if config.include_history {
         args.extend([
@@ -393,5 +395,13 @@ mod tests {
         assert_eq!(lines[1].grid_line_index, Some(1));
         assert_eq!(lines[2].text, "after");
         assert_eq!(lines[2].grid_line_index, Some(3));
+    }
+
+    #[test]
+    fn flagged_capture_keeps_spaces_at_the_wrap_boundary() {
+        let lines = parse_flagged_capture("W aaaaaaaaaaaaaaa     \n- bbb\n").unwrap();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "aaaaaaaaaaaaaaa     bbb");
     }
 }
