@@ -71,6 +71,33 @@ assert_num_eq() {
     fi
 }
 
+assert_prefix() {
+    local actual="$1"
+    local expected="$2"
+    local description="$3"
+    case "$actual" in
+        "$expected"*) ;;
+        *)
+            echo "tmux integration: $description: expected '$expected' prefix, got '$actual'" >&2
+            return 1
+            ;;
+    esac
+}
+
+# tmux 3.7 added the capture flags that let the index keep a physical grid
+# coordinate for each joined wrapped line. Without them jumps fall back to
+# copy-mode text search, which cannot tell repeated lines apart or stop a
+# prefix from matching a longer line, so the assertions that pin down an exact
+# position only hold from 3.7 on.
+tmux_version="$(tmux -V | grep -oE '[0-9]+\.[0-9]+' | head -n 1)"
+if [ "$(printf '%s\n3.7\n' "$tmux_version" | sort -V | head -n 1)" = "3.7" ]; then
+    exact_jumps=1
+else
+    exact_jumps=0
+    echo "tmux integration: tmux $tmux_version predates capture flags," \
+        "skipping exact-position assertions"
+fi
+
 pane="$(tmux -L "$SOCKET" -f /dev/null new-session -d -x 50 -y 8 -s review \
     -P -F '#{pane_id}' \
     "bash -c 'for i in \$(seq 1 40); do case \"\$i\" in 5|36|40) echo DUPLICATE ;; 20) echo \"-rw-r--r-- query_test.go\" ;; *) echo hist-\$i ;; esac; done; echo visible-a; echo DUPLICATE; echo visible-z; sleep 60'")"
@@ -83,7 +110,9 @@ line_no="$(printf '%s\n' "$record" | awk -F '\t' '{print $5}')"
 assert_gt "$line_no" "$history_size" "visible line is outside scrollback"
 TNX_TMUX_ARGS="-L $SOCKET" "$BIN" action --action jump --record "$record"
 scroll_position="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{scroll_position}')"
-assert_num_eq "$scroll_position" 2 "jump scroll position"
+if [ "$exact_jumps" -eq 1 ]; then
+    assert_num_eq "$scroll_position" 2 "jump scroll position"
+fi
 tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
 
 full_capture="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane -t "$pane")"
@@ -109,9 +138,11 @@ bottom_record="$(TNX_TMUX_ARGS="-L $SOCKET" TNX_SKIP_BLANK=0 "$BIN" capture \
 TNX_TMUX_ARGS="-L $SOCKET" TNX_SKIP_BLANK=0 "$BIN" action --action jump \
     --record "$bottom_record"
 bottom_scroll="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{scroll_position}')"
-assert_num_eq "$bottom_scroll" 0 "bottom-line jump position"
 bottom_cursor="$(tmux -L "$SOCKET" display-message -p -t "$pane" '#{copy_cursor_y}')"
-assert_num_eq "$bottom_cursor" 7 "bottom-line jump cursor row"
+if [ "$exact_jumps" -eq 1 ]; then
+    assert_num_eq "$bottom_scroll" 0 "bottom-line jump position"
+    assert_num_eq "$bottom_cursor" 7 "bottom-line jump cursor row"
+fi
 tmux -L "$SOCKET" send-keys -t "$pane" -X cancel
 
 # tmux only scrolls for `goto-line`; it leaves the cursor on the row the pane
@@ -129,7 +160,9 @@ for raised_target in raised-1 raised-50 raised-96 raised-100; do
         awk -F '\t' -v want="$raised_target" '$6 == want { print; exit }')"
     TNX_TMUX_ARGS="-L $SOCKET" "$BIN" action --action jump --record "$raised_record"
     raised_line="$(tmux -L "$SOCKET" display-message -p -t "$raised_pane" '#{copy_cursor_line}')"
-    assert_eq "$raised_line" "$raised_target" "raised-cursor jump target $raised_target"
+    if [ "$exact_jumps" -eq 1 ]; then
+        assert_eq "$raised_line" "$raised_target" "raised-cursor jump target $raised_target"
+    fi
     tmux -L "$SOCKET" send-keys -t "$raised_pane" -X cancel
 done
 
@@ -140,7 +173,13 @@ colon_record="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane --no-hist
     awk -F '\t' '$6 == "colon-target" { print; exit }')"
 TNX_TMUX_ARGS="-L $SOCKET" "$BIN" action --action jump --record "$colon_record"
 colon_cursor="$(tmux -L "$SOCKET" display-message -p -t "$colon_pane" '#{copy_cursor_line}')"
-assert_eq "$colon_cursor" colon-target "colon session jump target"
+if [ "$exact_jumps" -eq 1 ]; then
+    assert_eq "$colon_cursor" colon-target "colon session jump target"
+else
+    # The text fallback leaves copy mode's search status on the cursor line, so
+    # only the routing to the colon-named session can be checked here.
+    assert_prefix "$colon_cursor" colon-target "colon session jump target"
+fi
 tmux -L "$SOCKET" send-keys -t "$colon_pane" -X cancel
 
 limited_capture="$(TNX_TMUX_ARGS="-L $SOCKET" "$BIN" capture --scope pane \
