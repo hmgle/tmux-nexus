@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The zsh OSC 7 hook now preserves the previous command status without
   assigning zsh's read-only `status` parameter.
 - Installer archives now reject symlinks, hard links, and other non-regular
-  members before executable extraction.
+  members and enforce the fixed release member list before extraction.
 - Jump actions now retain physical grid coordinates when wrapped text is joined,
   activate the target pane's window, include the bottom grid line, and handle
   session names containing `:` without target parsing ambiguity. tmux versions

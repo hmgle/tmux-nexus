@@ -156,18 +156,31 @@ if ! tar -tzf "$tmp/$asset" > "$tmp/archive.list"; then
     echo "install-binary: failed to inspect $asset." >&2
     exit 1
 fi
-if awk '$0 ~ /^\// || $0 ~ /(^|\/)\.\.(\/|$)/ { bad = 1 } END { exit bad }' \
-    "$tmp/archive.list"; then
+archive_root_name="tnx-${target}"
+if awk -v root="$archive_root_name" '
+    {
+        name = $0
+        sub(/\/$/, "", name)
+        allowed = name == root || name == root "/tnx" ||
+            name == root "/README.md" || name == root "/LICENSE" ||
+            name == root "/CHANGELOG.md"
+        if (!allowed || ++seen[name] > 1) bad = 1
+    }
+    END { exit bad || seen[root] != 1 || seen[root "/tnx"] != 1 }
+' "$tmp/archive.list"; then
     :
 else
-    echo "install-binary: archive contains an unsafe path." >&2
+    echo "install-binary: archive does not match the release layout." >&2
     exit 1
 fi
 if ! tar -tvzf "$tmp/$asset" > "$tmp/archive.details"; then
     echo "install-binary: failed to inspect archive member types." >&2
     exit 1
 fi
-if awk '$1 !~ /^[-d][rwxXsStT-]{9}$/ { bad = 1 } END { exit bad }' \
+if awk '
+    $1 !~ /^[-d][rwxXsStT-]{9}$/ || / link to / || / -> / { bad = 1 }
+    END { exit bad }
+' \
     "$tmp/archive.details"; then
     :
 else
@@ -180,7 +193,7 @@ if ! tar -xzf "$tmp/$asset" -C "$tmp"; then
 fi
 
 # The tarball format is fixed by release.yml.
-archive_root="$tmp/tnx-${target}"
+archive_root="$tmp/$archive_root_name"
 if [ -L "$archive_root" ] || [ ! -d "$archive_root" ]; then
     echo "install-binary: archive root is not a directory." >&2
     exit 1
