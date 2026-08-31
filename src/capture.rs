@@ -176,7 +176,7 @@ fn capture_pane(pane: &PaneInfo, config: &Config) -> Result<CapturedPane> {
 }
 
 fn capture_pane_lines(pane: &PaneInfo, config: &Config) -> Result<Vec<CapturedLine>> {
-    if config.join_wraps {
+    if config.join_wraps && tmux::capture_flags_supported() {
         if let Ok(output) = capture_pane_output(pane, config, false, true) {
             if let Some(lines) = parse_flagged_capture(&output) {
                 return Ok(lines);

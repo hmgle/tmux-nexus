@@ -2,9 +2,12 @@ use std::{
     ffi::{OsStr, OsString},
     io::Write,
     process::{Child, Command, Output, Stdio},
+    sync::OnceLock,
 };
 
 use anyhow::{Context, Result};
+
+use crate::util::version_at_least;
 
 pub fn have(program: &str) -> bool {
     which::which(program).is_ok()
@@ -309,6 +312,13 @@ pub fn command_version(program: &str, args: &[&str]) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub fn capture_flags_supported() -> bool {
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        command_version("tmux", &["-V"]).is_some_and(|version| version_at_least(&version, 3, 7, 0))
+    })
 }
 
 pub fn write_to_command(program: &str, args: &[&str], input: &str) -> Result<()> {

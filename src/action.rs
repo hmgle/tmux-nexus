@@ -7,7 +7,7 @@ use crate::{
     index::{LegacyRecord, SearchIndex},
     tmux,
     types::ActionKind,
-    util::{trim_prefix_chars, version_at_least},
+    util::trim_prefix_chars,
 };
 
 struct ActionTarget<'a> {
@@ -48,7 +48,8 @@ pub fn execute(
 }
 
 pub fn execute_legacy(record: &LegacyRecord, action: ActionKind, config: &Config) -> Result<()> {
-    let exact_line_no = (!config.join_wraps || capture_flags_supported()).then_some(record.line_no);
+    let exact_line_no =
+        (!config.join_wraps || tmux::capture_flags_supported()).then_some(record.line_no);
     perform(
         action,
         &ActionTarget {
@@ -58,11 +59,6 @@ pub fn execute_legacy(record: &LegacyRecord, action: ActionKind, config: &Config
             text: &record.text,
         },
     )
-}
-
-fn capture_flags_supported() -> bool {
-    let version = tmux::command_version("tmux", &["-V"]).unwrap_or_default();
-    version_at_least(&version, 3, 7, 0)
 }
 
 fn perform(action: ActionKind, target: &ActionTarget<'_>) -> Result<()> {
