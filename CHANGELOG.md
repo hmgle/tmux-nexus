@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - The zsh OSC 7 hook now preserves the previous command status without
   assigning zsh's read-only `status` parameter.
+- The tmux plugin binding now honors `TNX_LAUNCH_KEY`, `TNX_MOTION_KEY`, and
+  `TNX_MOTION2_KEY` when their corresponding tmux options are unset.
 
 ## [0.8.0] - 2026-08-30
 

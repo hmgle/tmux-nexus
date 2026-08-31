@@ -30,12 +30,13 @@ export PATH="$TMP/bin:$PATH"
 
 "$REAL_TMUX" -L "$SOCKET" -f /dev/null new-session -d -s quote 'sleep 60'
 "$REAL_TMUX" -L "$SOCKET" set-option -g @tmux_nexus_pane_key /
-bash "$plugin/tmux_nexus.tmux"
+TNX_LAUNCH_KEY=G TNX_MOTION_KEY=M TNX_MOTION2_KEY=N bash "$plugin/tmux_nexus.tmux"
 
 bindings="$("$REAL_TMUX" -L "$SOCKET" list-keys -T prefix)"
-search_binding="$(printf '%s\n' "$bindings" | grep -E 'prefix[[:space:]]+g[[:space:]].*tnx search')"
+search_binding="$(printf '%s\n' "$bindings" | grep -E 'prefix[[:space:]]+G[[:space:]].*tnx search')"
 pane_binding="$(printf '%s\n' "$bindings" | grep -E 'prefix[[:space:]]+/[[:space:]].*tnx search --scope pane')"
-motion_binding="$(printf '%s\n' "$bindings" | grep -E 'prefix[[:space:]]+s[[:space:]].*motion-s.sh')"
+motion_binding="$(printf '%s\n' "$bindings" | grep -E 'prefix[[:space:]]+M[[:space:]].*motion-s.sh')"
+motion2_binding="$(printf '%s\n' "$bindings" | grep -E 'prefix[[:space:]]+N[[:space:]].*motion-s2.sh')"
 manager_binding="$(printf '%s\n' "$bindings" | grep -E 'prefix[[:space:]]+F[[:space:]].*tnx manage')"
 printf '%s\n' "$search_binding" | grep -Fq 'plugin\\ space'
 printf '%s\n' "$search_binding" | grep -Fq 'quote/tnx search'
@@ -43,6 +44,8 @@ printf '%s\n' "$pane_binding" | grep -Fq 'plugin\\ space'
 printf '%s\n' "$pane_binding" | grep -Fq 'quote/tnx search --scope pane'
 printf '%s\n' "$motion_binding" | grep -Fq 'plugin\\ space'
 printf '%s\n' "$motion_binding" | grep -Fq 'quote/scripts/motion-s.sh'
+printf '%s\n' "$motion2_binding" | grep -Fq 'plugin\\ space'
+printf '%s\n' "$motion2_binding" | grep -Fq 'quote/scripts/motion-s2.sh'
 printf '%s\n' "$manager_binding" | grep -Fq 'plugin\\ space'
 printf '%s\n' "$manager_binding" | grep -Fq 'quote/tnx manage'
 
