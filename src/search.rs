@@ -31,6 +31,7 @@ fn filter_literal(index: &SearchIndex, query: &str, case_mode: CaseMode) -> Vec<
             .expect("escaped literal regex is valid")
     });
 
+    let mut searchable = String::new();
     index
         .records
         .iter()
@@ -42,6 +43,7 @@ fn filter_literal(index: &SearchIndex, query: &str, case_mode: CaseMode) -> Vec<
                 query,
                 sensitive,
                 unicode_insensitive.as_ref(),
+                &mut searchable,
             )
         })
         .map(|(record_id, _)| record_id)
@@ -53,15 +55,14 @@ fn filter_regex(index: &SearchIndex, query: &str, case_mode: CaseMode) -> Result
         .case_insensitive(!case_mode.is_sensitive_for(query))
         .build()?;
 
-    Ok(index
-        .records
-        .iter()
-        .enumerate()
-        .filter(|(_, record)| {
-            searchable_text(index, record).is_some_and(|haystack| regex.is_match(&haystack))
-        })
-        .map(|(record_id, _)| record_id)
-        .collect())
+    let mut searchable = String::new();
+    let mut matches = Vec::new();
+    for (record_id, record) in index.records.iter().enumerate() {
+        if write_searchable_text(index, record, &mut searchable) && regex.is_match(&searchable) {
+            matches.push(record_id);
+        }
+    }
+    Ok(matches)
 }
 
 fn literal_match(
@@ -70,11 +71,11 @@ fn literal_match(
     needle: &str,
     sensitive: bool,
     unicode_insensitive: Option<&regex::Regex>,
+    searchable: &mut String,
 ) -> bool {
     if needle.contains('\t') {
-        return searchable_text(index, record).is_some_and(|haystack| {
-            field_contains(&haystack, needle, sensitive, unicode_insensitive)
-        });
+        return write_searchable_text(index, record, searchable)
+            && field_contains(searchable, needle, sensitive, unicode_insensitive);
     }
 
     let Some(pane) = index.pane_for(record) else {
@@ -130,16 +131,22 @@ fn ascii_eq_ignore_case(left: &[u8], right: &[u8]) -> bool {
         .all(|(left, right)| left.eq_ignore_ascii_case(right))
 }
 
-fn searchable_text(index: &SearchIndex, record: &Record) -> Option<String> {
-    let pane = index.pane_for(record)?;
-    let text = index.text_for(record)?;
-    Some(format!(
-        "{}\t{}\t{}\t{}",
-        pane.location(),
-        pane.command,
-        pane.window_name,
-        text
-    ))
+fn write_searchable_text(index: &SearchIndex, record: &Record, output: &mut String) -> bool {
+    let Some(pane) = index.pane_for(record) else {
+        return false;
+    };
+    let Some(text) = index.text_for(record) else {
+        return false;
+    };
+    output.clear();
+    output.push_str(pane.location());
+    output.push('\t');
+    output.push_str(&pane.command);
+    output.push('\t');
+    output.push_str(&pane.window_name);
+    output.push('\t');
+    output.push_str(text);
+    true
 }
 
 #[cfg(test)]

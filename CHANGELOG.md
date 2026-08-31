@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TNX_MOTION2_KEY` when their corresponding tmux options are unset.
 - Process signal fallbacks now perform a final process-start identity check
   immediately before delivery when Linux pidfds are unavailable.
+- Search filtering now reuses its combined-field buffer across records,
+  avoiding a temporary allocation for every regex or separator-aware match.
 
 ## [0.8.0] - 2026-08-30
 
