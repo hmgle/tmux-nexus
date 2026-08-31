@@ -84,6 +84,20 @@ fn jump(target: &ActionTarget<'_>) -> Result<()> {
     tmux::run(["select-pane", "-t", target.pane_id]).context("failed to select target pane")?;
     tmux::run(["copy-mode", "-t", target.pane_id]).context("failed to enter copy mode")?;
 
+    if let Some(copy_line) = exact_copy_line(target.pane_id, target.raw_line_no) {
+        let line = copy_line.to_string();
+        tmux::run([
+            "send-keys",
+            "-t",
+            target.pane_id,
+            "-X",
+            "goto-line",
+            line.as_str(),
+        ])
+        .context("failed to jump to selected history line")?;
+        return Ok(());
+    }
+
     let approx = target.raw_line_no.saturating_sub(5).max(1).to_string();
     tmux::run([
         "send-keys",
@@ -123,12 +137,35 @@ fn jump(target: &ActionTarget<'_>) -> Result<()> {
     Ok(())
 }
 
+fn exact_copy_line(pane_id: &str, history_line_no: usize) -> Option<usize> {
+    let output = tmux::try_stdout([
+        "display-message",
+        "-p",
+        "-t",
+        pane_id,
+        "#{history_size},#{pane_height}",
+    ])?;
+    let (history_size, pane_height) = output.split_once(',')?;
+    let history_size = history_size.parse::<usize>().ok()?;
+    let pane_height = pane_height.parse::<usize>().ok()?;
+    copy_line_from_bounds(history_size, pane_height, history_line_no)
+}
+
+fn copy_line_from_bounds(
+    history_size: usize,
+    pane_height: usize,
+    history_line_no: usize,
+) -> Option<usize> {
+    let last_line = history_size.checked_add(pane_height)?;
+    (history_line_no > 0 && history_line_no < last_line).then_some(last_line - history_line_no)
+}
+
 fn history_line_no(history_start_line: usize, raw_line_no: usize) -> usize {
     history_start_line + raw_line_no
 }
 
 fn split_location(location: &str) -> (&str, &str) {
-    let Some((session, rest)) = location.split_once(':') else {
+    let Some((session, rest)) = location.rsplit_once(':') else {
         return ("", "");
     };
     let window = rest.split('.').next().unwrap_or_default();
@@ -193,7 +230,7 @@ fn clipboard_commands() -> &'static [ClipboardCommand] {
 
 #[cfg(test)]
 mod tests {
-    use super::history_line_no;
+    use super::{copy_line_from_bounds, history_line_no, split_location};
 
     #[test]
     fn unbounded_capture_uses_snapshot_line_number() {
@@ -203,5 +240,17 @@ mod tests {
     #[test]
     fn limited_capture_restores_history_offset() {
         assert_eq!(history_line_no(1200, 25), 1225);
+    }
+
+    #[test]
+    fn exact_copy_line_counts_from_the_bottom() {
+        assert_eq!(copy_line_from_bounds(23, 8, 20), Some(11));
+        assert_eq!(copy_line_from_bounds(23, 8, 30), Some(1));
+        assert_eq!(copy_line_from_bounds(23, 8, 31), None);
+    }
+
+    #[test]
+    fn location_parser_preserves_colons_in_session_names() {
+        assert_eq!(split_location("foo:bar:2.1"), ("foo:bar", "2"));
     }
 }
