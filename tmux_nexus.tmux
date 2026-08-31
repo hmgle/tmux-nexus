@@ -14,12 +14,12 @@ motion2_command="$(tnx_shell_quote "$CURRENT_DIR/scripts/motion-s2.sh") #{client
 manager_command="$(tnx_shell_quote "$CURRENT_DIR/tnx") manage"
 
 launch_key=$(tmux show-option -gqv "@tmux_nexus_launch_key" 2>/dev/null)
-launch_key="${launch_key:-${TNX_LAUNCH_KEY:-g}}"
+launch_key="${TNX_LAUNCH_KEY:-${launch_key:-g}}"
 pane_key=$(tmux show-option -gqv "@tmux_nexus_pane_key" 2>/dev/null)
 motion_key=$(tmux show-option -gqv "@tmux_nexus_motion_key" 2>/dev/null)
-motion_key="${motion_key:-${TNX_MOTION_KEY:-s}}"
+motion_key="${TNX_MOTION_KEY:-${motion_key:-s}}"
 motion2_key=$(tmux show-option -gqv "@tmux_nexus_motion2_key" 2>/dev/null)
-motion2_key="${motion2_key:-${TNX_MOTION2_KEY:-}}"
+motion2_key="${TNX_MOTION2_KEY:-${motion2_key:-}}"
 if [ "${TNX_MANAGER_KEY+x}" = x ]; then
     manager_key="$TNX_MANAGER_KEY"
 elif tmux show-option -g "@tmux_nexus_manager_key" >/dev/null 2>&1; then

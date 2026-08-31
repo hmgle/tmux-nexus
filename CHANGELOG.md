@@ -10,12 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - The zsh OSC 7 hook now preserves the previous command status without
   assigning zsh's read-only `status` parameter.
+- Installer archives now reject symlinks, hard links, and other non-regular
+  members before executable extraction.
+- Jump actions now target the selected absolute history line instead of relying
+  on the nearest matching text, and session names containing `:` are parsed
+  correctly.
 - The tmux plugin binding now honors `TNX_LAUNCH_KEY`, `TNX_MOTION_KEY`, and
   `TNX_MOTION2_KEY` when their corresponding tmux options are unset.
 - Process signal fallbacks now perform a final process-start identity check
   immediately before delivery when Linux pidfds are unavailable.
 - Search filtering now reuses its combined-field buffer across records,
   avoiding a temporary allocation for every regex or separator-aware match.
+- Documentation now matches the ASCII motion-overlay border defaults used by
+  the implementation.
 
 ## [0.8.0] - 2026-08-30
 

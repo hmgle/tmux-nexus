@@ -199,8 +199,8 @@ Supported values:
 | `motion_case` / `TNX_MOTION_CASE`                               | `insensitive`                 | `smart`, `sensitive`, `insensitive`                     |
 | `motion_smartsign` / `TNX_MOTION_SMARTSIGN`                     | `0`                           | `1` also matches shifted symbols such as `1` -> `!`     |
 | `motion_copy_mode_no_prefix` / `TNX_MOTION_COPY_MODE_NO_PREFIX` | `0`                           | bind motion keys directly in copy-mode tables           |
-| `motion_vertical_border` / `TNX_MOTION_VERTICAL_BORDER`         | `│`                           | vertical border used by the motion overlay               |
-| `motion_horizontal_border` / `TNX_MOTION_HORIZONTAL_BORDER`     | `─`                           | horizontal border used by the motion overlay             |
+| `motion_vertical_border` / `TNX_MOTION_VERTICAL_BORDER`         | `|`                           | vertical border used by the motion overlay               |
+| `motion_horizontal_border` / `TNX_MOTION_HORIZONTAL_BORDER`     | `-`                           | horizontal border used by the motion overlay             |
 | `motion_hint1_fg` / `TNX_MOTION_HINT1_FG`                       | `1;31`                        | SGR color for the first hint character                  |
 | `motion_hint2_fg` / `TNX_MOTION_HINT2_FG`                       | `1;32`                        | SGR color for the second hint character                 |
 | `motion_dim` / `TNX_MOTION_DIM`                                 | `2`                           | SGR color for dimmed pane borders                       |
@@ -373,7 +373,9 @@ picker would capture and index more scrollback than needed.
    regex matching with `--regex`.
 4. fzf displays compact rows while preview and actions resolve the selected
    record ID against the same snapshot.
-5. Actions call tmux directly to jump, copy, send, or print.
+5. Actions call tmux directly to jump, copy, send, or print. Jump actions
+   translate the snapshot's absolute history line into tmux copy-mode's
+   bottom-relative position, avoiding ambiguity when text is duplicated.
 
 Motion mode uses a separate visible-screen path. It lists the panes in the
 current tmux window once, starts their independent `capture-pane` commands
