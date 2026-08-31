@@ -49,6 +49,11 @@ printf '%s\n' "$motion2_binding" | grep -Fq 'quote/scripts/motion-s2.sh'
 printf '%s\n' "$manager_binding" | grep -Fq 'plugin\\ space'
 printf '%s\n' "$manager_binding" | grep -Fq 'quote/tnx manage'
 
+TNX_PANE_KEY=P bash "$plugin/tmux_nexus.tmux"
+pane_env_binding="$("$REAL_TMUX" -L "$SOCKET" list-keys -T prefix |
+    grep -E 'prefix[[:space:]]+P[[:space:]].*tnx search --scope pane')"
+printf '%s\n' "$pane_env_binding" | grep -Fq 'plugin\\ space'
+
 "$REAL_TMUX" -L "$SOCKET" unbind-key F
 "$REAL_TMUX" -L "$SOCKET" set-option -g @tmux_nexus_manager_key ''
 bash "$plugin/tmux_nexus.tmux"

@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   activate the target pane's window, include the bottom grid line, and handle
   session names containing `:` without target parsing ambiguity. tmux versions
   without capture wrap flags fall back to text positioning for joined lines.
-- `TNX_LAUNCH_KEY`, `TNX_MOTION_KEY`, and `TNX_MOTION2_KEY` now take precedence
-  over their corresponding tmux options when the plugin creates bindings.
+- `TNX_LAUNCH_KEY`, `TNX_PANE_KEY`, `TNX_MOTION_KEY`, and `TNX_MOTION2_KEY` now
+  take precedence over their corresponding tmux options when the plugin creates
+  bindings.
 - Process signal fallbacks and privilege helpers now perform one final UID and
   process-start check immediately before delivery. Linux pidfds verify identity
   after opening to cover reuse before the pidfd became stable.

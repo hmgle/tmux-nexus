@@ -182,7 +182,7 @@ Supported values:
 | Option / env var                                                | Default                       | Values                                                  |
 | --------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------- |
 | `launch_key` / `TNX_LAUNCH_KEY`                                 | `g`                           | tmux prefix binding                                     |
-| `pane_key`                                                      | empty                         | tmux prefix binding for current-pane search             |
+| `pane_key` / `TNX_PANE_KEY`                                     | empty                         | tmux prefix binding for current-pane search             |
 | `scope` / `TNX_SCOPE`                                           | `all`                         | `all`, `session`, `pane`                                |
 | `include_history` / `TNX_INCLUDE_HISTORY`                       | `1`                           | `1` or `0`                                              |
 | `history_lines` / `TNX_HISTORY_LINES`                           | `0`                           | `0` for all history, or a positive line count           |

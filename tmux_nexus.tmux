@@ -16,6 +16,7 @@ manager_command="$(tnx_shell_quote "$CURRENT_DIR/tnx") manage"
 launch_key=$(tmux show-option -gqv "@tmux_nexus_launch_key" 2>/dev/null)
 launch_key="${TNX_LAUNCH_KEY:-${launch_key:-g}}"
 pane_key=$(tmux show-option -gqv "@tmux_nexus_pane_key" 2>/dev/null)
+pane_key="${TNX_PANE_KEY:-$pane_key}"
 motion_key=$(tmux show-option -gqv "@tmux_nexus_motion_key" 2>/dev/null)
 motion_key="${TNX_MOTION_KEY:-${motion_key:-s}}"
 motion2_key=$(tmux show-option -gqv "@tmux_nexus_motion2_key" 2>/dev/null)
