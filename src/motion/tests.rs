@@ -632,12 +632,87 @@ fn move_cursor_handles_leading_empty_rows() {
 }
 
 #[test]
+fn move_cursor_normalizes_tabs_without_crossing_rows() {
+    let server = TestTmux::start(
+        "printf '%b' '\\n\\tZ\\n'; printf '\\033[2;11H'; sleep 60",
+        20,
+        8,
+    );
+    let lines = server.wait_for_lines(&server.pane_id, "Z");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains('Z'))
+        .expect("tab target line");
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(
+        &server.client(),
+        &pane,
+        target_line,
+        1,
+        None,
+        TabMode::PositionAware,
+    )
+    .expect("tab cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (8, target_line));
+    assert_eq!(
+        server.stdout(&[
+            "display-message",
+            "-p",
+            "-t",
+            server.pane_id.as_str(),
+            "#{copy_cursor_line}",
+        ]),
+        "\tZ"
+    );
+}
+
+#[test]
+fn move_cursor_normalizes_wide_cells_without_crossing_rows() {
+    let server = TestTmux::start(
+        "printf '%b' '\\n你你你a\\n'; printf '\\033[2;11H'; sleep 60",
+        20,
+        8,
+    );
+    let lines = server.wait_for_lines(&server.pane_id, "你你你a");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("你你你a"))
+        .expect("wide target line");
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(
+        &server.client(),
+        &pane,
+        target_line,
+        0,
+        None,
+        TabMode::PositionAware,
+    )
+    .expect("wide cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
+    assert_eq!(
+        server.stdout(&[
+            "display-message",
+            "-p",
+            "-t",
+            server.pane_id.as_str(),
+            "#{copy_cursor_line}",
+        ]),
+        "你你你a"
+    );
+}
+
+#[test]
 fn move_cursor_handles_wrapped_target_line() {
     let server = TestTmux::start(
         "printf '%b' '012345678901234567890123456789\\ntarget-h\\nend\\n'; sleep 60",
         5,
         8,
     );
+    server.wait_for_lines(&server.pane_id, "t-h");
     let window_id = server.stdout(&[
         "display-message",
         "-p",

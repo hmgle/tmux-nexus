@@ -392,7 +392,8 @@ concurrently, and preserves pane order while collecting the results. It then
 searches the visible text and draws an ANSI hint overlay in a borderless tmux
 popup. Selecting a target sends the ordered window, pane, copy-mode, and cursor
 operations to tmux as one command sequence instead of starting a tmux process
-for every cursor step.
+for every cursor step. Positioning keeps physical rows stable across wrapped
+continuations and tmux's position-aware tab and wide-character cells.
 
 ## Development
 
