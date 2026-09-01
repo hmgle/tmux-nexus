@@ -549,8 +549,7 @@ fn move_cursor_positions_same_pane() {
     let lines = server.wait_for_lines(&server.pane_id, "line2_target");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, 2, 7, None, TabMode::PositionAware)
-        .expect("same-pane cursor move");
+    move_cursor_with_client(&server.client(), &pane, 2, 7, None).expect("same-pane cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (7, 2));
 }
@@ -570,15 +569,8 @@ fn move_cursor_handles_wrapped_continuation_at_top() {
     assert!(target_line >= 2, "expected wrapped rows above target");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(
-        &server.client(),
-        &pane,
-        target_line,
-        0,
-        None,
-        TabMode::PositionAware,
-    )
-    .expect("wrapped continuation cursor move");
+    move_cursor_with_client(&server.client(), &pane, target_line, 0, None)
+        .expect("wrapped continuation cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
     assert_eq!(
@@ -601,8 +593,7 @@ fn move_cursor_selects_cross_pane_target() {
     let lines = server.wait_for_lines(&pane2, "line1_target");
     let pane = server.pane(&pane2, lines);
 
-    move_cursor_with_client(&server.client(), &pane, 1, 6, None, TabMode::PositionAware)
-        .expect("cross-pane cursor move");
+    move_cursor_with_client(&server.client(), &pane, 1, 6, None).expect("cross-pane cursor move");
 
     assert_eq!(server.active_pane(), pane2);
     assert_eq!(server.copy_cursor(&pane.pane_id), (6, 1));
@@ -618,17 +609,64 @@ fn move_cursor_handles_leading_empty_rows() {
         .expect("target line");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(
-        &server.client(),
-        &pane,
-        target_line,
-        0,
-        None,
-        TabMode::PositionAware,
-    )
-    .expect("leading-empty cursor move");
+    move_cursor_with_client(&server.client(), &pane, target_line, 0, None)
+        .expect("leading-empty cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
+}
+
+#[test]
+fn move_cursor_handles_wrapped_empty_continuation_before_target() {
+    let server = TestTmux::start("printf '%20s%s\\n' '' target_text; sleep 60", 20, 8);
+    let lines = server.wait_for_lines(&server.pane_id, "target_text");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("target_text"))
+        .expect("target line");
+    assert_eq!(target_line, 1, "expected target on wrapped continuation");
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(&server.client(), &pane, target_line, 7, None)
+        .expect("wrapped-empty cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (7, target_line));
+    assert_eq!(
+        server.stdout(&[
+            "display-message",
+            "-p",
+            "-t",
+            server.pane_id.as_str(),
+            "#{copy_cursor_line}",
+        ]),
+        "target_text"
+    );
+}
+
+#[test]
+fn move_cursor_handles_indented_wrapped_empty_continuation() {
+    let server = TestTmux::start("printf '%20s%s\\n' '' '  target_text'; sleep 60", 20, 8);
+    let lines = server.wait_for_lines(&server.pane_id, "target_text");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("target_text"))
+        .expect("target line");
+    assert_eq!(target_line, 1, "expected target on wrapped continuation");
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(&server.client(), &pane, target_line, 2, None)
+        .expect("indented wrapped-empty cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (2, target_line));
+    assert_eq!(
+        server.stdout(&[
+            "display-message",
+            "-p",
+            "-t",
+            server.pane_id.as_str(),
+            "#{copy_cursor_line}",
+        ]),
+        "  target_text"
+    );
 }
 
 #[test]
@@ -645,15 +683,8 @@ fn move_cursor_normalizes_tabs_without_crossing_rows() {
         .expect("tab target line");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(
-        &server.client(),
-        &pane,
-        target_line,
-        1,
-        None,
-        TabMode::PositionAware,
-    )
-    .expect("tab cursor move");
+    move_cursor_with_client(&server.client(), &pane, target_line, 1, None)
+        .expect("tab cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (8, target_line));
     assert_eq!(
@@ -682,15 +713,8 @@ fn move_cursor_normalizes_wide_cells_without_crossing_rows() {
         .expect("wide target line");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(
-        &server.client(),
-        &pane,
-        target_line,
-        0,
-        None,
-        TabMode::PositionAware,
-    )
-    .expect("wide cursor move");
+    move_cursor_with_client(&server.client(), &pane, target_line, 0, None)
+        .expect("wide cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
     assert_eq!(
@@ -738,15 +762,8 @@ fn move_cursor_handles_wrapped_target_line() {
     let line = &pane.lines[target.line_no];
     let true_col = true_position(line, target.visual_col, TabMode::PositionAware);
 
-    move_cursor_with_client(
-        &server.client(),
-        pane,
-        target.line_no,
-        true_col,
-        None,
-        TabMode::PositionAware,
-    )
-    .expect("wrapped target cursor move");
+    move_cursor_with_client(&server.client(), pane, target.line_no, true_col, None)
+        .expect("wrapped target cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (2, 5));
     assert_eq!(

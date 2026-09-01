@@ -19,7 +19,7 @@ pub(super) fn move_to_match(
         .get(target.line_no)
         .context("motion target line not found")?;
     let true_col = true_position(line, target.visual_col, tab_mode);
-    move_cursor(pane, target.line_no, true_col, target_client, tab_mode)
+    move_cursor(pane, target.line_no, true_col, target_client)
 }
 
 fn move_cursor(
@@ -27,10 +27,9 @@ fn move_cursor(
     line_no: usize,
     true_col: usize,
     target_client: Option<&str>,
-    tab_mode: TabMode,
 ) -> Result<()> {
     let client = tmux::TmuxClient::from_env()?;
-    move_cursor_with_client(&client, pane, line_no, true_col, target_client, tab_mode)
+    move_cursor_with_client(&client, pane, line_no, true_col, target_client)
 }
 
 pub(super) fn move_cursor_with_client(
@@ -39,16 +38,8 @@ pub(super) fn move_cursor_with_client(
     line_no: usize,
     true_col: usize,
     target_client: Option<&str>,
-    tab_mode: TabMode,
 ) -> Result<()> {
-    let mut commands = navigation_commands(pane, line_no, target_client, tab_mode);
-    if true_col > 0 {
-        let columns = true_col.to_string();
-        commands.push(copy_command(
-            pane,
-            &["-N", columns.as_str(), "cursor-right"],
-        ));
-    }
+    let commands = navigation_commands(pane, line_no, true_col, target_client);
     client
         .run_commands(&commands)
         .context("failed to move motion cursor")
@@ -57,8 +48,8 @@ pub(super) fn move_cursor_with_client(
 fn navigation_commands(
     pane: &Pane,
     line_no: usize,
+    true_col: usize,
     target_client: Option<&str>,
-    tab_mode: TabMode,
 ) -> Vec<Vec<OsString>> {
     let mut commands = Vec::new();
     if let Some(target_client) = target_client {
@@ -79,29 +70,59 @@ fn navigation_commands(
     commands.push(copy_command(pane, &["top-line"]));
 
     let mut rows_remaining = line_no;
-    if tab_mode == TabMode::PositionAware {
-        let first_non_empty = pane
-            .lines
-            .iter()
-            .position(|line| !line.is_empty())
-            .unwrap_or_default();
-        if first_non_empty > 0 && first_non_empty <= line_no {
-            let first = first_non_empty.to_string();
-            commands.push(copy_command(pane, &["-N", first.as_str(), "cursor-down"]));
-            // A leading empty row can retain tmux's previous last-column
-            // value on tmux 3.6+. Reset it only after reaching a non-empty
-            // physical row. Calling `start-of-line` on the first visible row
-            // would be unsafe because it may be a wrapped continuation and
-            // change the viewport row we are targeting.
-            commands.push(copy_command(pane, &["start-of-line"]));
-            rows_remaining -= first_non_empty;
+    let mut cursor_right = true_col;
+    let first_non_empty = pane
+        .lines
+        .iter()
+        .take(line_no.saturating_add(1))
+        .position(|line| !line.is_empty());
+    let anchor = first_non_empty.filter(|anchor| {
+        *anchor > 0
+            && (pane.lines[*anchor]
+                .chars()
+                .next()
+                .is_some_and(|character| !character.is_whitespace())
+                || *anchor == line_no)
+    });
+    if let Some(anchor) = anchor {
+        commands.push(repeat_command(pane, anchor, "cursor-down"));
+        // Empty rows leave cx == ox == 0, so tmux does not update lastsx.
+        // On the next non-empty row, cx >= lastsx then triggers tmux's
+        // snap-to-end-of-line behavior.  Back-to-indentation establishes a
+        // known content cell on the first safe physical row without
+        // start-of-line's wrap-aware jump to the beginning of the logical
+        // line.
+        commands.push(copy_command(pane, &["back-to-indentation"]));
+        rows_remaining -= anchor;
+
+        // When the target itself is the first non-empty row and starts with
+        // spaces or a tab, back-to-indentation lands on the first content
+        // cell.  true_col is measured from the physical row's start, so
+        // advance only past the leading whitespace that was skipped.
+        if anchor == line_no {
+            let leading = pane.lines[anchor]
+                .chars()
+                .take_while(|character| matches!(character, ' ' | '\t'))
+                .count();
+            cursor_right = true_col.saturating_sub(leading);
         }
+
+        // If the logical line begins above the visible pane with content,
+        // tmux may still scroll while resolving the wrapped line.  Copy mode
+        // has no primitive for a physical-row start that avoids this case.
     }
     if rows_remaining > 0 {
-        let rows = rows_remaining.to_string();
-        commands.push(copy_command(pane, &["-N", rows.as_str(), "cursor-down"]));
+        commands.push(repeat_command(pane, rows_remaining, "cursor-down"));
+    }
+    if cursor_right > 0 {
+        commands.push(repeat_command(pane, cursor_right, "cursor-right"));
     }
     commands
+}
+
+fn repeat_command(pane: &Pane, count: usize, name: &str) -> Vec<OsString> {
+    let count = count.to_string();
+    copy_command(pane, &["-N", count.as_str(), name])
 }
 
 fn copy_command(pane: &Pane, args: &[&str]) -> Vec<OsString> {
