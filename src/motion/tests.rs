@@ -616,6 +616,83 @@ fn move_cursor_handles_leading_empty_rows() {
 }
 
 #[test]
+fn move_cursor_handles_indented_row_before_target() {
+    let server = TestTmux::start(
+        "printf '\\n    indented_row\\ntarget_row\\n'; sleep 60",
+        40,
+        8,
+    );
+    let lines = server.wait_for_lines(&server.pane_id, "target_row");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("target_row"))
+        .expect("target line");
+    assert_eq!(target_line, 2);
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(&server.client(), &pane, target_line, 3, None)
+        .expect("indented row cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (3, target_line));
+}
+
+#[test]
+fn move_cursor_handles_tab_indented_row_before_target() {
+    let server = TestTmux::start(
+        "printf '%b' '\\n\\tindented_row\\ntarget_row\\n'; sleep 60",
+        40,
+        8,
+    );
+    let lines = server.wait_for_lines(&server.pane_id, "target_row");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("target_row"))
+        .expect("target line");
+    assert_eq!(target_line, 2);
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(&server.client(), &pane, target_line, 3, None)
+        .expect("tab-indented row cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (3, target_line));
+}
+
+#[test]
+fn move_cursor_ignores_pure_space_and_tab_rows_as_anchors() {
+    let server = TestTmux::start("printf '%b' '\\n  \\t\\ntarget_row\\n'; sleep 60", 40, 8);
+    let lines = server.wait_for_lines(&server.pane_id, "target_row");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("target_row"))
+        .expect("target line");
+    assert_eq!(target_line, 2);
+    assert_eq!(lines[1], "  \t");
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(&server.client(), &pane, target_line, 3, None)
+        .expect("pure whitespace row cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (3, target_line));
+}
+
+#[test]
+fn move_cursor_preserves_matches_inside_indentation() {
+    let server = TestTmux::start("printf '\\n    indented_row\\n'; sleep 60", 40, 8);
+    let lines = server.wait_for_lines(&server.pane_id, "indented_row");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("indented_row"))
+        .expect("target line");
+    assert_eq!(target_line, 1);
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(&server.client(), &pane, target_line, 1, None)
+        .expect("indented match cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (1, target_line));
+}
+
+#[test]
 fn move_cursor_handles_wrapped_empty_continuation_before_target() {
     let server = TestTmux::start("printf '%20s%s\\n' '' target_text; sleep 60", 20, 8);
     let lines = server.wait_for_lines(&server.pane_id, "target_text");

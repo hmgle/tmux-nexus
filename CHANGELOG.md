@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Motion jumps no longer move above matches when the visible viewport starts
   in the middle of a wrapped line.
-- Motion jumps now preserve the target row when leading empty rows cause tmux
-  to snap to the end of a later line, regardless of tmux tab handling mode and
-  including lines containing tabs or wide characters.
+- Motion jumps now preserve the target row when leading empty or space/tab-only
+  rows cause tmux to snap to the end of a later line, regardless of tmux tab
+  handling mode and including lines containing tabs or wide characters.
 
 ## [0.8.1] - 2026-08-31
 
