@@ -139,8 +139,7 @@ pub(super) fn is_tab_free_content_row(line: &str) -> bool {
     // take_while would swallow the first content character while testing
     // its predicate, so skip spaces explicitly and inspect what follows.
     line.chars()
-        .skip_while(|character| *character == ' ')
-        .next()
+        .find(|character| *character != ' ')
         .is_some_and(|character| !is_blank(character))
 }
 
