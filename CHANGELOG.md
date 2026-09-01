@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Motion jumps no longer move above matches when the visible viewport starts
+  in the middle of a wrapped line.
+
 ## [0.8.1] - 2026-08-31
 
 ### Fixed

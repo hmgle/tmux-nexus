@@ -556,6 +556,44 @@ fn move_cursor_positions_same_pane() {
 }
 
 #[test]
+fn move_cursor_handles_wrapped_continuation_at_top() {
+    let server = TestTmux::start(
+        "printf '%*s' 60 '' | tr ' ' x; printf '\\n'; printf 'line1\\nline2\\nline3\\nline4\\nline5\\nline6\\nline7\\ntarget_line\\n'; sleep 60",
+        20,
+        10,
+    );
+    let lines = server.wait_for_lines(&server.pane_id, "target_line");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("target_line"))
+        .expect("target line");
+    assert!(target_line >= 2, "expected wrapped rows above target");
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(
+        &server.client(),
+        &pane,
+        target_line,
+        0,
+        None,
+        TabMode::PositionAware,
+    )
+    .expect("wrapped continuation cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
+    assert_eq!(
+        server.stdout(&[
+            "display-message",
+            "-p",
+            "-t",
+            server.pane_id.as_str(),
+            "#{copy_cursor_line}",
+        ]),
+        "target_line"
+    );
+}
+
+#[test]
 fn move_cursor_selects_cross_pane_target() {
     let server = TestTmux::start("printf 'left\\n'; sleep 60", 40, 12);
     let pane2 = server.split_window("printf 'line0\\nline1_target\\n'; sleep 60");
@@ -591,4 +629,59 @@ fn move_cursor_handles_leading_empty_rows() {
     .expect("leading-empty cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
+}
+
+#[test]
+fn move_cursor_handles_wrapped_target_line() {
+    let server = TestTmux::start(
+        "printf '%b' '012345678901234567890123456789\\ntarget-h\\nend\\n'; sleep 60",
+        5,
+        8,
+    );
+    let window_id = server.stdout(&[
+        "display-message",
+        "-p",
+        "-t",
+        server.pane_id.as_str(),
+        "#{window_id}",
+    ]);
+    let panes = init_panes_with_client(&server.client(), Some(&window_id))
+        .expect("capture wrapped target pane");
+    let pane = panes
+        .iter()
+        .find(|pane| pane.pane_id == server.pane_id)
+        .expect("wrapped target pane");
+    let matches = find_matches(
+        std::slice::from_ref(pane),
+        "h",
+        CaseMode::Insensitive,
+        false,
+        TabMode::PositionAware,
+    );
+    assert_eq!(matches.len(), 1);
+    let target = &matches[0];
+    let line = &pane.lines[target.line_no];
+    let true_col = true_position(line, target.visual_col, TabMode::PositionAware);
+
+    move_cursor_with_client(
+        &server.client(),
+        pane,
+        target.line_no,
+        true_col,
+        None,
+        TabMode::PositionAware,
+    )
+    .expect("wrapped target cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (2, 5));
+    assert_eq!(
+        server.stdout(&[
+            "display-message",
+            "-p",
+            "-t",
+            server.pane_id.as_str(),
+            "#{copy_cursor_line}",
+        ]),
+        "t-h"
+    );
 }
