@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Motion jumps now preserve the target row when leading empty or space/tab-only
   rows cause tmux to snap to the end of a later line, regardless of tmux tab
   handling mode and including lines containing tabs or wide characters.
+- Motion jumps now skip tab-indented rows as anchors, keeping the exact target
+  row and column when the first visible content row is a tab-indented wrapped
+  continuation.
 
 ## [0.8.1] - 2026-08-31
 

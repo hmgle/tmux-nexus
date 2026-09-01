@@ -658,6 +658,77 @@ fn move_cursor_handles_tab_indented_row_before_target() {
 }
 
 #[test]
+fn move_cursor_skips_tab_indented_wrapped_anchor() {
+    // Row 0 is a blank wrapped continuation, row 1 is its tab-indented tail,
+    // and the target sits below: start-of-line would resolve one row high.
+    let server = TestTmux::start(
+        "printf '%21s' ''; printf '\\tcode\\ntarget here\\nfiller\\n'; sleep 60",
+        20,
+        8,
+    );
+    let lines = server.wait_for_lines(&server.pane_id, "target here");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("target here"))
+        .expect("target line");
+    assert_eq!(target_line, 2);
+    assert_eq!(lines[1], " \tcode");
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(&server.client(), &pane, target_line, 7, None)
+        .expect("tab-wrapped anchor cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (7, target_line));
+}
+
+#[test]
+fn move_cursor_lands_on_tab_run_for_tab_match() {
+    // A pattern matching the leading tab itself resolves to true_col 0.
+    // cursor-left cannot cross the tab padding to column zero, so the
+    // cursor stops on the tab run's last cell.
+    let server = TestTmux::start(
+        "printf '%b' '\\n\\tZ\\n'; printf '\\033[2;11H'; sleep 60",
+        20,
+        8,
+    );
+    let lines = server.wait_for_lines(&server.pane_id, "Z");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains('Z'))
+        .expect("tab target line");
+    assert_eq!(target_line, 1);
+    let pane = server.pane(&server.pane_id, lines);
+
+    let matches = find_matches(
+        std::slice::from_ref(&pane),
+        "\t",
+        CaseMode::Insensitive,
+        false,
+        TabMode::PositionAware,
+    );
+    assert_eq!(matches.len(), 1);
+    let target = &matches[0];
+    let line = &pane.lines[target.line_no];
+    let true_col = true_position(line, target.visual_col, TabMode::PositionAware);
+    assert_eq!(true_col, 0);
+
+    move_cursor_with_client(&server.client(), &pane, target.line_no, true_col, None)
+        .expect("tab match cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (7, target_line));
+    assert_eq!(
+        server.stdout(&[
+            "display-message",
+            "-p",
+            "-t",
+            server.pane_id.as_str(),
+            "#{copy_cursor_line}",
+        ]),
+        "\tZ"
+    );
+}
+
+#[test]
 fn move_cursor_ignores_pure_space_and_tab_rows_as_anchors() {
     let server = TestTmux::start("printf '%b' '\\n  \\t\\ntarget_row\\n'; sleep 60", 40, 8);
     let lines = server.wait_for_lines(&server.pane_id, "target_row");

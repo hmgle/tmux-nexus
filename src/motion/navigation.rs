@@ -69,18 +69,34 @@ fn navigation_commands(
     }
     commands.push(copy_command(pane, &["top-line"]));
 
-    // Motion captures do not include tmux's wrap flags. If the logical line
-    // starts above the viewport and the captured first row is an empty wrapped
-    // continuation, back-to-indentation can resolve above the capture. The
-    // resulting physical target row is then undercounted; capture wrap flags
-    // are required to eliminate this straddle limitation.
+    // Motion captures do not include tmux's wrap flags, so straddled wraps can
+    // undercount the physical target row: back-to-indentation resolves either
+    // above the capture (the first captured row is an empty wrapped
+    // continuation of a line that starts higher) or onto an earlier row of the
+    // anchor's own logical line. Capture wrap flags are required to eliminate
+    // this.
     let mut rows_remaining = line_no;
-    let anchor = pane
-        .lines
-        .iter()
-        .take(line_no.saturating_add(1))
-        .position(|line| line.chars().any(|character| !is_blank(character)))
-        .filter(|anchor| *anchor > 0);
+    // A blank-only first row leaves tmux's lastsx at zero, so later
+    // cursor-down calls snap to each content row's end. A first row with
+    // content updates lastsx on the initial cursor-down and needs no anchor.
+    let needs_anchor = line_no > 0
+        && pane
+            .lines
+            .first()
+            .is_some_and(|line| line.chars().all(is_blank));
+    let anchor = needs_anchor.then(|| {
+        // Anchor on the first row whose leading blanks are spaces only. Rows
+        // with a leading tab are skipped: back-to-indentation lands on their
+        // first content cell, but cursor-left cannot retreat through tab
+        // padding to column zero, and the leftover column would offset the
+        // rows still below. Without such a row the target anchors itself; no
+        // further cursor-down follows, so its retreat stays on that row.
+        pane.lines
+            .iter()
+            .take(line_no.saturating_add(1))
+            .position(|line| is_tab_free_content_row(line.as_str()))
+            .unwrap_or(line_no)
+    });
     if let Some(anchor) = anchor {
         commands.push(repeat_command(pane, anchor, "cursor-down"));
         // Empty rows leave cx == ox == 0, so tmux does not update lastsx. On
@@ -90,24 +106,18 @@ fn navigation_commands(
         // logical line start; with a non-straddling capture, all rows before
         // this anchor are blank, so its first content cell is on the anchor.
         commands.push(copy_command(pane, &["back-to-indentation"]));
-        let leading: String = pane.lines[anchor]
-            .chars()
-            .take_while(|character| is_blank(*character))
-            .collect();
-        if !leading.is_empty() {
-            if anchor < line_no && leading.contains('\t') {
-                // A tab's padding makes cursor-left wrap before it reaches
-                // column zero. The target still needs more vertical motion,
-                // so use start-of-line here; the straddled-wrap limitation
-                // above applies if this row is itself a continuation.
-                commands.push(copy_command(pane, &["start-of-line"]));
-            } else {
-                // For spaces, moving left one source cell at a time reaches
-                // column zero without crossing the anchor row. A tab is kept
-                // as one source cell when the anchor is the target itself;
-                // cursor-right then preserves its normal tab positioning.
-                commands.push(repeat_command(pane, leading.chars().count(), "cursor-left"));
-            }
+        // cursor-left crosses to the previous row when a step starts at
+        // column zero or on the padding of a tab anchored there — the skip
+        // falls out at column zero without checking the tab cell. Retreating
+        // exactly the leading blank count never starts a step in either
+        // state: each blank is one step (a tab's padding moves in a single
+        // motion), so the final step lands on the leading group with no
+        // step left to issue. A match on the leading tab itself therefore
+        // stops on the tab run's last cell.
+        let line = &pane.lines[anchor];
+        let leading = leading_blanks(line);
+        if leading > 0 && leading < line.chars().count() {
+            commands.push(repeat_command(pane, leading, "cursor-left"));
         }
         rows_remaining -= anchor;
     }
@@ -122,6 +132,21 @@ fn navigation_commands(
 
 fn is_blank(character: char) -> bool {
     matches!(character, ' ' | '\t')
+}
+
+fn is_tab_free_content_row(line: &str) -> bool {
+    let mut chars = line.chars();
+    let leading: String = chars
+        .by_ref()
+        .take_while(|character| is_blank(*character))
+        .collect();
+    !leading.contains('\t') && chars.next().is_some()
+}
+
+fn leading_blanks(line: &str) -> usize {
+    line.chars()
+        .take_while(|character| is_blank(*character))
+        .count()
 }
 
 fn repeat_command(pane: &Pane, count: usize, name: &str) -> Vec<OsString> {
