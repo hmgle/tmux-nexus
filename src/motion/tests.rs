@@ -695,6 +695,33 @@ fn move_cursor_skips_tab_indented_wrapped_anchor() {
 }
 
 #[test]
+fn move_cursor_anchors_on_single_character_tail_row() {
+    // Row 0 is a blank wrapped continuation and row 1 the single-character
+    // tail of that logical line; the line's first content cell is the tail
+    // character itself, so back-to-indentation stays on the anchor row. A
+    // take_while-based predicate used to reject single-character rows and
+    // pushed the anchor onto the target row instead.
+    let server = TestTmux::start(
+        "printf '%20s' ''; printf 'x\\ntarget_row\\n'; sleep 60",
+        20,
+        8,
+    );
+    let lines = server.wait_for_lines(&server.pane_id, "target_row");
+    let target_line = lines
+        .iter()
+        .position(|line| line.contains("target_row"))
+        .expect("target line");
+    assert_eq!(target_line, 2);
+    assert_eq!(lines[1], "x");
+    let pane = server.pane(&server.pane_id, lines);
+
+    move_cursor_with_client(&server.client(), &pane, target_line, 3, None)
+        .expect("single-character tail anchor cursor move");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (3, target_line));
+}
+
+#[test]
 fn move_cursor_lands_on_tab_run_for_tab_match() {
     // A pattern matching the leading tab itself resolves to true_col 0.
     // cursor-left cannot cross the tab padding to column zero, so the
