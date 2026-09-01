@@ -69,12 +69,6 @@ fn navigation_commands(
     }
     commands.push(copy_command(pane, &["top-line"]));
 
-    // Motion captures do not include tmux's wrap flags, so straddled wraps can
-    // undercount the physical target row: back-to-indentation resolves either
-    // above the capture (the first captured row is an empty wrapped
-    // continuation of a line that starts higher) or onto an earlier row of the
-    // anchor's own logical line. Capture wrap flags are required to eliminate
-    // this.
     let mut rows_remaining = line_no;
     // A blank-only first row leaves tmux's lastsx at zero, so later
     // cursor-down calls snap to each content row's end. A first row with
@@ -105,17 +99,24 @@ fn navigation_commands(
         // the next row. Back-to-indentation is wrap-aware and starts at the
         // logical line start; with a non-straddling capture, all rows before
         // this anchor are blank, so its first content cell is on the anchor.
+        // Motion captures do not include tmux's wrap flags, so straddled
+        // wraps can undercount the physical target row: back-to-indentation
+        // resolves either above the capture (the first captured row is an
+        // empty wrapped continuation of a line that starts higher) or onto
+        // an earlier row of the anchor's own logical line. Capture wrap
+        // flags are required to eliminate this.
         commands.push(copy_command(pane, &["back-to-indentation"]));
         // cursor-left crosses to the previous row when a step starts at
-        // column zero or on the padding of a tab anchored there — the skip
-        // falls out at column zero without checking the tab cell. Retreating
-        // exactly the leading blank count never starts a step in either
-        // state: each blank is one step (a tab's padding moves in a single
-        // motion), so the final step lands on the leading group with no
-        // step left to issue. A match on the leading tab itself therefore
+        // column zero or on tab padding anchored there. Retreating exactly
+        // the leading blank count never starts such a step — each blank is
+        // one step, a tab's padding included — so a match on a leading tab
         // stops on the tab run's last cell.
         let line = &pane.lines[anchor];
         let leading = leading_blanks(line);
+        // An all-blank anchor row (reachable via a pure-space pattern) skips
+        // the retreat: back-to-indentation finds no content cell, so the
+        // cursor keeps the snapped end column — row correct, column off by
+        // up to one tab width. Accepted: no reliable landing exists.
         if leading > 0 && leading < line.chars().count() {
             commands.push(repeat_command(pane, leading, "cursor-left"));
         }
@@ -134,13 +135,13 @@ fn is_blank(character: char) -> bool {
     matches!(character, ' ' | '\t')
 }
 
-fn is_tab_free_content_row(line: &str) -> bool {
-    let mut chars = line.chars();
-    let leading: String = chars
-        .by_ref()
-        .take_while(|character| is_blank(*character))
-        .collect();
-    !leading.contains('\t') && chars.next().is_some()
+pub(super) fn is_tab_free_content_row(line: &str) -> bool {
+    // take_while would swallow the first content character while testing
+    // its predicate, so skip spaces explicitly and inspect what follows.
+    line.chars()
+        .skip_while(|character| *character == ' ')
+        .next()
+        .is_some_and(|character| !is_blank(character))
 }
 
 fn leading_blanks(line: &str) -> usize {
@@ -150,6 +151,12 @@ fn leading_blanks(line: &str) -> usize {
 }
 
 fn repeat_command(pane: &Pane, count: usize, name: &str) -> Vec<OsString> {
+    // tmux rejects `-N 0` ("repeat count too small") with a nonzero exit
+    // that fails the whole batched sequence; a zero count is a no-op, and
+    // run_commands skips empty commands.
+    if count == 0 {
+        return Vec::new();
+    }
     let count = count.to_string();
     copy_command(pane, &["-N", count.as_str(), name])
 }

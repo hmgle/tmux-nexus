@@ -2,7 +2,7 @@ use super::{
     capture::{init_panes_with_client, MotionSnapshot},
     hints::{assign_hints_by_distance, generate_hints, hint_positions},
     matching::{find_matches, smartsign_patterns},
-    navigation::move_cursor_with_client,
+    navigation::{is_tab_free_content_row, move_cursor_with_client},
     popup_command,
     rendering::{expand_tabs, string_width, true_position, visual_slice},
     terminal::read_key,
@@ -228,6 +228,19 @@ fn converts_visual_column_to_true_position() {
     assert_eq!(true_position("a\tb", 8, TabMode::PositionAware), 2);
     assert_eq!(true_position("a\tb", 8, TabMode::Fixed), 2);
     assert_eq!(true_position("a\tb", 9, TabMode::Fixed), 2);
+}
+
+#[test]
+fn detects_tab_free_content_rows() {
+    // Any content character after space-only leading blanks qualifies as an
+    // anchor, including single-character rows: a take_while-based check
+    // swallowed the first content character and wrongly rejected them.
+    for line in ["x", "  x", "a", "ab", "  ab"] {
+        assert!(is_tab_free_content_row(line), "{line:?} should anchor");
+    }
+    for line in ["", " ", "\t", "\tZ", "  \t", "  \tzz"] {
+        assert!(!is_tab_free_content_row(line), "{line:?} should not anchor");
+    }
 }
 
 #[test]
@@ -685,7 +698,9 @@ fn move_cursor_skips_tab_indented_wrapped_anchor() {
 fn move_cursor_lands_on_tab_run_for_tab_match() {
     // A pattern matching the leading tab itself resolves to true_col 0.
     // cursor-left cannot cross the tab padding to column zero, so the
-    // cursor stops on the tab run's last cell.
+    // cursor stops on the tab run's last cell (column 7 here) while the
+    // overlay hint highlights the tab's visual column 0: tmux offers no
+    // landing between the two short of crossing to the previous row.
     let server = TestTmux::start(
         "printf '%b' '\\n\\tZ\\n'; printf '\\033[2;11H'; sleep 60",
         20,
