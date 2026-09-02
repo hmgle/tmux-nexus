@@ -191,6 +191,13 @@ impl Drop for TestTmux {
             .output();
     }
 }
+// tmux 3.6 started keeping tab cells in pane captures, the PositionAware tab
+// mode. Older tmux expands tabs to spaces, trims trailing whitespace, and
+// truncates #{copy_cursor_line} at the first wide cell, so assertions pinning
+// tab-shaped content only hold from 3.6 on. CI runs an older tmux.
+fn tab_aware_capture() -> bool {
+    super::detect_tmux_tab_mode() == TabMode::PositionAware
+}
 
 #[test]
 fn detects_tmux_tab_modes() {
@@ -674,6 +681,11 @@ fn move_cursor_handles_tab_indented_row_before_target() {
 fn move_cursor_skips_tab_indented_wrapped_anchor() {
     // Row 0 is a blank wrapped continuation, row 1 is its tab-indented tail,
     // and the target sits below: start-of-line would resolve one row high.
+    if !tab_aware_capture() {
+        // Pre-3.6 captures expand the tab to spaces, so no tab-indented
+        // anchor row exists to skip.
+        return;
+    }
     let server = TestTmux::start(
         "printf '%21s' ''; printf '\\tcode\\ntarget here\\nfiller\\n'; sleep 60",
         20,
@@ -728,6 +740,11 @@ fn move_cursor_lands_on_tab_run_for_tab_match() {
     // cursor stops on the tab run's last cell (column 7 here) while the
     // overlay hint highlights the tab's visual column 0: tmux offers no
     // landing between the two short of crossing to the previous row.
+    if !tab_aware_capture() {
+        // Pre-3.6 captures expand the tab to spaces, so no tab run exists
+        // to match.
+        return;
+    }
     let server = TestTmux::start(
         "printf '%b' '\\n\\tZ\\n'; printf '\\033[2;11H'; sleep 60",
         20,
@@ -772,6 +789,11 @@ fn move_cursor_lands_on_tab_run_for_tab_match() {
 
 #[test]
 fn move_cursor_ignores_pure_space_and_tab_rows_as_anchors() {
+    // Pre-3.6 captures trim trailing whitespace, so the pure-whitespace row
+    // this test pins is captured empty; the scenario needs 3.6+.
+    if !tab_aware_capture() {
+        return;
+    }
     let server = TestTmux::start("printf '%b' '\\n  \\t\\ntarget_row\\n'; sleep 60", 40, 8);
     let lines = server.wait_for_lines(&server.pane_id, "target_row");
     let target_line = lines
@@ -861,6 +883,11 @@ fn move_cursor_handles_indented_wrapped_empty_continuation() {
 
 #[test]
 fn move_cursor_normalizes_tabs_without_crossing_rows() {
+    // Tab-run normalization needs the PositionAware tab mode; pre-3.6
+    // captures expand the tab, so visual and true columns already agree.
+    if !tab_aware_capture() {
+        return;
+    }
     let server = TestTmux::start(
         "printf '%b' '\\n\\tZ\\n'; printf '\\033[2;11H'; sleep 60",
         20,
@@ -907,16 +934,20 @@ fn move_cursor_normalizes_wide_cells_without_crossing_rows() {
         .expect("wide cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
-    assert_eq!(
-        server.stdout(&[
-            "display-message",
-            "-p",
-            "-t",
-            server.pane_id.as_str(),
-            "#{copy_cursor_line}",
-        ]),
-        "你你你a"
-    );
+    // Pre-3.6 tmux truncates #{copy_cursor_line} at the first wide cell; the
+    // cursor position above pins the row landing on every version.
+    if tab_aware_capture() {
+        assert_eq!(
+            server.stdout(&[
+                "display-message",
+                "-p",
+                "-t",
+                server.pane_id.as_str(),
+                "#{copy_cursor_line}",
+            ]),
+            "你你你a"
+        );
+    }
 }
 
 #[test]
