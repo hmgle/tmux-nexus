@@ -1,5 +1,6 @@
 use super::{
     capture::{init_panes_with_client, refresh_panes_with_client, MotionSnapshot},
+    detect_tmux_tab_mode,
     hints::{assign_hints_by_distance, generate_hints, hint_positions},
     matching::{find_matches, smartsign_patterns},
     navigation::{is_tab_free_content_row, move_cursor_with_client},
@@ -55,6 +56,7 @@ impl TestTmux {
         let output = Command::new("tmux")
             .arg("-L")
             .arg(&socket)
+            .args(["-f", "/dev/null"])
             .arg("new-session")
             .arg("-d")
             .arg("-x")
@@ -604,18 +606,13 @@ fn refresh_panes_recomputes_http_targets_after_clear_screen_redraw() {
     server.wait_for_lines(&server.pane_id, "(push)");
     let panes = init_panes_with_client(&server.client(), Some(&server.pane_id))
         .expect("capture before redraw");
-    assert!(panes[0].lines[2].starts_with("origin\thttps"));
+    let tab_mode = detect_tmux_tab_mode();
+    assert!(expand_tabs(&panes[0].lines[2], tab_mode).starts_with("origin  https"));
 
     server.stdout(&["wait-for", "-S", "redraw"]);
     server.wait_for_lines(&server.pane_id, "previous_prompt");
     let panes = refresh_panes_with_client(&server.client(), panes).expect("refresh after redraw");
-    let matches = find_matches(
-        &panes,
-        "h",
-        CaseMode::Insensitive,
-        false,
-        TabMode::PositionAware,
-    );
+    let matches = find_matches(&panes, "h", CaseMode::Insensitive, false, tab_mode);
     let targets: Vec<_> = matches
         .iter()
         .filter(|target| target.visual_col == 8)
@@ -627,7 +624,7 @@ fn refresh_panes_recomputes_http_targets_after_clear_screen_redraw() {
     for target in targets {
         let pane = &panes[target.pane_index];
         let line = &pane.lines[target.line_no];
-        let true_col = true_position(line, target.visual_col, TabMode::PositionAware);
+        let true_col = true_position(line, target.visual_col, tab_mode);
         move_cursor_with_client(&server.client(), pane, target.line_no, true_col, None)
             .expect("jump to refreshed HTTP target");
 
@@ -775,7 +772,7 @@ fn move_cursor_skips_tab_indented_wrapped_anchor() {
         .position(|line| line.contains("target here"))
         .expect("target line");
     assert_eq!(target_line, 2);
-    assert_eq!(lines[1], " \tcode");
+    assert_eq!(lines[1].trim_start_matches([' ', '\t']), "code");
     let pane = server.pane(&server.pane_id, lines);
 
     move_cursor_with_client(&server.client(), &pane, target_line, 7, None)
@@ -831,17 +828,23 @@ fn move_cursor_lands_on_tab_run_for_tab_match() {
     assert_eq!(target_line, 1);
     let pane = server.pane(&server.pane_id, lines);
 
+    let tab_mode = detect_tmux_tab_mode();
     let matches = find_matches(
         std::slice::from_ref(&pane),
         "\t",
         CaseMode::Insensitive,
         false,
-        TabMode::PositionAware,
+        tab_mode,
     );
+    if tab_mode == TabMode::Fixed {
+        // Older capture-pane expands tabs, so a literal tab has no target.
+        assert!(matches.is_empty());
+        return;
+    }
     assert_eq!(matches.len(), 1);
     let target = &matches[0];
     let line = &pane.lines[target.line_no];
-    let true_col = true_position(line, target.visual_col, TabMode::PositionAware);
+    let true_col = true_position(line, target.visual_col, tab_mode);
     assert_eq!(true_col, 0);
 
     move_cursor_with_client(&server.client(), &pane, target.line_no, true_col, None)
@@ -869,7 +872,7 @@ fn move_cursor_ignores_pure_space_and_tab_rows_as_anchors() {
         .position(|line| line.contains("target_row"))
         .expect("target line");
     assert_eq!(target_line, 2);
-    assert_eq!(lines[1], "  \t");
+    assert!(lines[1].chars().all(|ch| matches!(ch, ' ' | '\t')));
     let pane = server.pane(&server.pane_id, lines);
 
     move_cursor_with_client(&server.client(), &pane, target_line, 3, None)
@@ -963,7 +966,8 @@ fn move_cursor_normalizes_tabs_without_crossing_rows() {
         .expect("tab target line");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 1, None)
+    let true_col = true_position(&pane.lines[target_line], 8, detect_tmux_tab_mode());
+    move_cursor_with_client(&server.client(), &pane, target_line, true_col, None)
         .expect("tab cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (8, target_line));
@@ -975,7 +979,7 @@ fn move_cursor_normalizes_tabs_without_crossing_rows() {
             server.pane_id.as_str(),
             "#{copy_cursor_line}",
         ]),
-        "\tZ"
+        pane.lines[target_line]
     );
 }
 
@@ -997,14 +1001,10 @@ fn move_cursor_normalizes_wide_cells_without_crossing_rows() {
         .expect("wide cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
+    // Older copy_cursor_line truncates wide-cell text. Inspect the physical
+    // row as well as the exact copy cursor coordinates above on every version.
     assert_eq!(
-        server.stdout(&[
-            "display-message",
-            "-p",
-            "-t",
-            server.pane_id.as_str(),
-            "#{copy_cursor_line}",
-        ]),
+        server.capture_lines(&server.pane_id)[target_line],
         "你你你a"
     );
 }

@@ -426,6 +426,11 @@ The tmux integration tests require `tmux`; picker workflows and CI also require
 `fzf`. The motion terminal test uses `uv` and Python's standard library. Every
 test server uses its own explicit tmux socket.
 
+On tmux with floating panes, also run
+`uv run --no-project python tests/motion-lifecycle.py` to exercise startup
+failure, pane termination, detachment, and first-frame readiness. CI tests both
+the system tmux popup backend and the window backend on pinned tmux 3.7c.
+
 Use `./tnx doctor` to verify local dependencies and resolved
 configuration.
 
