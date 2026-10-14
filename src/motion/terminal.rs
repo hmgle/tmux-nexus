@@ -36,10 +36,16 @@ impl AnsiScreen {
     }
 
     pub(super) fn init(&mut self) -> Result<()> {
-        let mut stdout = io::stdout().lock();
-        stdout.write_all(b"\x1b[?25l\x1b[2J")?;
-        stdout.flush()?;
+        self.buffer.push_str("\x1b[?25l\x1b[2J");
         self.active = true;
+        Ok(())
+    }
+
+    // The title follows the complete frame in the same PTY byte stream. The
+    // supervisor waits for tmux to parse it before exposing the window.
+    pub(super) fn set_title(&mut self, title: &str) -> Result<()> {
+        anyhow::ensure!(!title.chars().any(char::is_control), "invalid motion title");
+        write!(self.buffer, "\x1b]2;{title}\x07")?;
         Ok(())
     }
 

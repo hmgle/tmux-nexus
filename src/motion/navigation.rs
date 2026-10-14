@@ -52,17 +52,6 @@ fn navigation_commands(
     target_client: Option<&str>,
 ) -> Vec<Vec<OsString>> {
     let mut commands = Vec::new();
-    if let Some(target_client) = target_client {
-        commands.push(command([
-            "switch-client",
-            "-c",
-            target_client,
-            "-t",
-            pane.window_id.as_str(),
-        ]));
-    } else {
-        commands.push(command(["select-window", "-t", pane.window_id.as_str()]));
-    }
     commands.push(command(["select-pane", "-t", pane.pane_id.as_str()]));
     if !pane.copy_mode {
         commands.push(command(["copy-mode", "-t", pane.pane_id.as_str()]));
@@ -127,6 +116,19 @@ fn navigation_commands(
     }
     if true_col > 0 {
         commands.push(repeat_command(pane, true_col, "cursor-right"));
+    }
+    // Expose the source only after positioning is complete. The hint-window
+    // supervisor treats leaving the overlay as completion or cancellation.
+    if let Some(target_client) = target_client {
+        commands.push(command([
+            "switch-client",
+            "-c",
+            target_client,
+            "-t",
+            pane.window_id.as_str(),
+        ]));
+    } else {
+        commands.push(command(["select-window", "-t", pane.window_id.as_str()]));
     }
     commands
 }

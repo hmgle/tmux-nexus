@@ -4,6 +4,7 @@ import fcntl
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shlex
 import struct
@@ -80,6 +81,15 @@ def check_motion():
                 shlex.join(["bash", "--noprofile", "--rcfile", str(fixture), "-i"]),
             )
             window = tmux("display-message", "-p", "-t", pane, "#{window_id}")
+            capabilities = subprocess.run(
+                ["tmux", "-S", socket, "list-commands", "new-pane"], env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False, text=True,
+            )
+            window_backend = capabilities.returncode == 0 and capabilities.stdout.startswith("new-pane ")
+            backend = "window" if window_backend else "popup"
+            assert os.environ.get("TNX_TEST_MOTION_BACKEND", backend) == backend, "wrong motion backend"
+            tmux("set-hook", "-w", "-t", window, "window-layout-changed",
+                 "set-option -g @tnx_test_layout_changed 1")
             tmux("set-window-option", "-t", pane, "mode-keys", "vi")
             tmux("set-window-option", "-t", pane, "scroll-on-clear", "on")
             tmux("split-window", "-v", "-d", "-t", pane, "sleep 60")
@@ -125,6 +135,7 @@ def check_motion():
                         ) if choice != "cancel" else None
 
                         terminal_output.clear()
+                        tmux("set-option", "-g", "@tnx_test_layout_changed", "0")
                         os.write(master, b"\x02" + key)
                         prompt = b"motion:" if key == b"s" else b"motion 1/2:"
                         wait_until(lambda: prompt in terminal_output, "motion prompt")
@@ -137,8 +148,17 @@ def check_motion():
                                     "second motion prompt",
                                 )
                         wait_until(lambda: list(tmp.glob("tnx_motion.*.json")), "motion snapshot")
-                        wait_until(lambda: b"origin  " in terminal_output, "hint screen")
+                        wait_until(
+                            lambda: re.search(rb"\x1b\[(?:[0-9]+;)*31m", terminal_output),
+                            "red hint labels",
+                        )
+                        if window_backend:
+                            assert tmux("display-message", "-p", "#{window_id}") != window
+                            assert tmux("display-message", "-p", "#{pane_title}").startswith("tnx-motion-ready-")
+                        else:
+                            assert tmux("list-windows", "-F", "#{window_id}") == window
                         drain()
+                        assert tmux("show-option", "-gqv", "@tnx_test_layout_changed") == "0", "opening hints changed the source layout"
                         assert grid() == before_grid, "opening hints changed the source grid"
                         assert metadata() == before_metadata, "opening hints resized or scrolled the source"
 
@@ -161,7 +181,8 @@ def check_motion():
                         assert metadata() == before_metadata, "leaving motion resized or scrolled the source"
                         assert tmux("display-message", "-p", "#{window_id}") == window
                         assert tmux("list-windows", "-F", "#{window_id}") == window, "overlay window leaked"
-                        print(f"motion: zoom={zoom}, query={query.decode()}, {choice}: passed")
+                        assert tmux("show-option", "-gqv", "@tnx_test_layout_changed") == "0", "closing hints changed the source layout"
+                        print(f"motion ({backend}): zoom={zoom}, query={query.decode()}, {choice}: passed")
         finally:
             subprocess.run(
                 ["tmux", "-S", socket, "kill-server"], env=env,

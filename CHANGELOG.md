@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Motion hint windows are prepared before display and cleaned up when their
+  pane exits, the client detaches, or the user changes windows. Cleanup no
+  longer depends on shell completion signals, steals focus, or renumbers
+  existing windows. Startup failures are reported to the originating client.
+- Motion correctly falls back to popups when older tmux versions return an
+  empty, successful response to the floating-pane capability check.
 - Motion hints no longer shift zoomed pane content when opening or closing on
   tmux versions with floating panes. These versions use a temporary hint window
   that leaves the original pane dimensions intact and is removed on exit.

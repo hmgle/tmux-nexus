@@ -325,9 +325,36 @@ fn run_action(args: ActionArgs) -> Result<()> {
 }
 
 fn run_motion(args: motion::MotionArgs) -> Result<()> {
-    ensure_tmux()?;
-    let config = Config::load(&ConfigOverrides::default())?;
-    motion::run(args, &config)
+    let target_client = args.target_client.clone();
+    let overlay = args.overlay;
+    let supervised = args.ready_title.is_some();
+    let result = (|| {
+        ensure_tmux()?;
+        let config = Config::load(&ConfigOverrides::default())?;
+        motion::run(args, &config)
+    })();
+    if overlay && supervised {
+        if let (Err(error), Ok(pane)) = (&result, std::env::var("TMUX_PANE")) {
+            tmux::run_ignore([
+                "set-option",
+                "-p",
+                "-t",
+                &pane,
+                "@tnx_motion_error",
+                &format!("{error:#}"),
+            ]);
+        }
+    } else if !overlay {
+        if let Err(error) = &result {
+            let message = format!("tmux-nexus motion: {error:#}");
+            if let Some(client) = target_client.as_deref() {
+                tmux::run_ignore(["display-message", "-c", client, &message]);
+            } else {
+                tmux::display_message(&message);
+            }
+        }
+    }
+    result
 }
 
 fn run_doctor() -> Result<()> {

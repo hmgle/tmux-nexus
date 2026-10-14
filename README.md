@@ -392,10 +392,13 @@ concurrently, and preserves pane order while collecting the results. It then
 searches the visible text and draws an ANSI hint overlay in a borderless tmux
 popup. On tmux versions with floating panes, motion uses a temporary window
 instead: opening and closing a floating popup would temporarily unzoom the
-source pane and reflow its content. The temporary window is removed after
-selection or cancellation. After the overlay opens, motion refreshes the
-original panes and rebuilds the hints so jumps use the current grid if opening
-the overlay resized or redrew the underlying panes. Selecting a target sends
+source pane and reflow its content. The temporary window is displayed only
+after tmux has received its complete hint screen. It is removed after selection,
+cancellation, client detachment, or switching to another window, without
+renumbering existing windows or pulling the client back from another window.
+Motion refreshes the original panes before drawing the hints: after popup
+creation on older tmux, or while the hint window is still hidden on newer tmux.
+Selecting a target sends
 the ordered window, pane, copy-mode, and cursor operations to tmux as one
 command sequence instead of starting a tmux process for every cursor step.
 Positioning keeps physical rows stable across wrapped continuations and tmux's

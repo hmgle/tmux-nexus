@@ -486,6 +486,7 @@ fn popup_command_targets_originating_client() {
         target_client: None,
         overlay: false,
         snapshot: None,
+        ready_title: None,
         case_mode: Some(CaseMode::Sensitive),
         smartsign: true,
         no_smartsign: false,
