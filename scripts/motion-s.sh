@@ -14,6 +14,7 @@ query_option="@tmux_nexus_motion_query_$client_pid"
 run_command="$(tnx_shell_quote "$CURRENT_DIR/scripts/motion-run.sh") s $(tnx_shell_quote "$client_pid") $(tnx_shell_quote "$target_window")"
 [ -z "$target_client" ] || run_command="$run_command $(tnx_shell_quote "$target_client")"
 
+# Leave the client command queue free to send keys to the hint window.
 tmux command-prompt -1F -p "motion:" \
     "set-option -gq $query_option '%%%'" \
-    \; run-shell "$run_command"
+    \; run-shell -b "$run_command"

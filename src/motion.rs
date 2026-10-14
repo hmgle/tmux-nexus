@@ -7,7 +7,7 @@ mod terminal;
 
 use std::{
     collections::HashSet,
-    io,
+    fs, io,
     os::fd::AsRawFd,
     path::{Path, PathBuf},
 };
@@ -232,6 +232,17 @@ fn run_popup(
     let target_window = target_window.context("motion target window not found")?;
     let target_pane = target_pane.context("motion target pane not found")?;
     let exe = std::env::current_exe().context("failed to resolve current executable")?;
+    if tmux::try_stdout(["list-commands", "new-pane"]).is_some() {
+        return run_overlay_window(
+            exe.to_string_lossy().as_ref(),
+            args,
+            pattern,
+            target_window,
+            target_pane,
+            target_client,
+            snapshot_path,
+        );
+    }
     tmux::run(popup_command(
         exe.to_string_lossy().as_ref(),
         args,
@@ -241,6 +252,129 @@ fn run_popup(
         target_client,
         snapshot_path,
     ))
+}
+
+fn run_overlay_window(
+    exe: &str,
+    args: &MotionArgs,
+    pattern: &str,
+    target_window: &str,
+    target_pane: &str,
+    target_client: Option<&str>,
+    snapshot_path: &Path,
+) -> Result<()> {
+    // tmux versions with floating panes unzoom/rezoom when a popup is
+    // created or removed. A separate window leaves the source grid intact.
+    let session = tmux::stdout(["display-message", "-p", "-t", target_pane, "#{session_id}"])?;
+    let (width, height) = window_size(Some(target_window))?;
+    let status_file = Builder::new().prefix("tnx_motion_status.").tempfile()?;
+    let channel = format!("tnx-motion-{}", status_file.path().display());
+    let start_channel = format!("{channel}-start");
+    let done_channel = format!("{channel}-done");
+    let mut tmux_command = vec!["tmux".to_string()];
+    if let Ok(value) = std::env::var("TNX_TMUX_ARGS") {
+        tmux_command.extend(shell_words::split(&value).context("failed to parse TNX_TMUX_ARGS")?);
+    }
+    let tmux_command = tmux_command
+        .iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let overlay = overlay_command(
+        exe,
+        args,
+        pattern,
+        target_window,
+        target_client,
+        snapshot_path,
+    );
+    let shell_command = format!(
+        "{tmux_command} wait-for {}; {overlay}; motion_status=$?; \
+         printf '%s' \"$motion_status\" > {}; {tmux_command} wait-for -S {}",
+        shell_quote(&start_channel),
+        shell_quote(&status_file.path().to_string_lossy()),
+        shell_quote(&done_channel),
+    );
+    let mut command = vec![
+        "new-window".to_string(),
+        "-d".into(),
+        "-P".into(),
+        "-F".into(),
+        "#{window_id}".into(),
+        "-t".into(),
+        format!("{}:", session.trim()),
+        "-n".into(),
+        "motion".into(),
+    ];
+    if let Ok(value) = std::env::var("TNX_TMUX_ARGS") {
+        command.extend(["-e".into(), format!("TNX_TMUX_ARGS={value}")]);
+    }
+    command.push(shell_command);
+    let overlay_window = tmux::stdout(command)?.trim().to_string();
+    let client = tmux::TmuxClient::from_env()?;
+    let result = (|| {
+        client.run_commands(&[
+            strings(&[
+                "set-option",
+                "-w",
+                "-t",
+                &overlay_window,
+                "remain-on-exit",
+                "on",
+            ]),
+            strings(&[
+                "set-option",
+                "-w",
+                "-t",
+                &overlay_window,
+                "window-size",
+                "manual",
+            ]),
+            strings(&[
+                "set-option",
+                "-w",
+                "-t",
+                &overlay_window,
+                "pane-border-status",
+                "off",
+            ]),
+            strings(&[
+                "resize-window",
+                "-t",
+                &overlay_window,
+                "-x",
+                &width.to_string(),
+                "-y",
+                &height.to_string(),
+            ]),
+            select_overlay_window(&overlay_window, target_client),
+            strings(&["wait-for", "-S", &start_channel]),
+            strings(&["wait-for", &done_channel]),
+        ])?;
+        let status = fs::read_to_string(status_file.path())?;
+        anyhow::ensure!(
+            status == "0",
+            "motion overlay failed (exit status {status})"
+        );
+        Ok(())
+    })();
+    // Keep the overlay window until we have returned to the source; otherwise
+    // tmux may select an unrelated window when the overlay process exits.
+    let restore = client.run(select_overlay_window(target_window, target_client));
+    let cleanup = client.run(["kill-window", "-t", &overlay_window]);
+    result.and(restore).and(cleanup)
+}
+
+fn strings(args: &[&str]) -> Vec<std::ffi::OsString> {
+    args.iter().map(std::ffi::OsString::from).collect()
+}
+
+fn select_overlay_window(window: &str, client: Option<&str>) -> Vec<std::ffi::OsString> {
+    if let Some(client) = client {
+        strings(&["switch-client", "-c", client, "-t", window])
+    } else {
+        strings(&["select-window", "-t", window])
+    }
 }
 
 fn target_popup_pane(panes: &[Pane]) -> Option<String> {
@@ -260,6 +394,41 @@ fn popup_command(
     target_client: Option<&str>,
     snapshot_path: &Path,
 ) -> Vec<String> {
+    let command = overlay_command(
+        exe,
+        args,
+        pattern,
+        target_window,
+        target_client,
+        snapshot_path,
+    );
+    let mut popup = vec![
+        "display-popup".to_string(),
+        "-E".to_string(),
+        "-B".to_string(),
+        "-w".to_string(),
+        "100%".to_string(),
+        "-h".to_string(),
+        "100%".to_string(),
+        "-t".to_string(),
+        target_pane.to_string(),
+    ];
+    if let Some(target_client) = target_client {
+        popup.push("-c".to_string());
+        popup.push(target_client.to_string());
+    }
+    popup.push(command);
+    popup
+}
+
+fn overlay_command(
+    exe: &str,
+    args: &MotionArgs,
+    pattern: &str,
+    target_window: &str,
+    target_client: Option<&str>,
+    snapshot_path: &Path,
+) -> String {
     let mut command = vec![
         shell_quote(exe),
         "motion".into(),
@@ -287,23 +456,7 @@ fn popup_command(
         command.push("--no-smartsign".into());
     }
 
-    let mut popup = vec![
-        "display-popup".to_string(),
-        "-E".to_string(),
-        "-B".to_string(),
-        "-w".to_string(),
-        "100%".to_string(),
-        "-h".to_string(),
-        "100%".to_string(),
-        "-t".to_string(),
-        target_pane.to_string(),
-    ];
-    if let Some(target_client) = target_client {
-        popup.push("-c".to_string());
-        popup.push(target_client.to_string());
-    }
-    popup.push(command.join(" "));
-    popup
+    command.join(" ")
 }
 
 #[derive(Clone, Debug)]

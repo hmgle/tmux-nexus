@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Motion hints no longer shift zoomed pane content when opening or closing on
+  tmux versions with floating panes. These versions use a temporary hint window
+  that leaves the original pane dimensions intact and is removed on exit.
 - Motion hints now refresh their pane content after the popup opens, avoiding
   stale jump coordinates when tmux temporarily unzooms a pane and the shell
   redraws cleared-screen output such as `git remote -v`.

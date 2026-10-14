@@ -25,6 +25,7 @@ fi
 submit_command="$(tnx_shell_quote "$CURRENT_DIR/scripts/motion-s2-submit.sh") $(tnx_shell_quote "$client_pid") $(tnx_shell_quote "$target_window")"
 [ -z "$target_client" ] || submit_command="$submit_command $(tnx_shell_quote "$target_client")"
 
+# Leave the client command queue free to send keys to the hint window.
 tmux command-prompt -1F -p "motion 2/2: $first" \
     "set-option -gq $second_option '%%%'" \
-    \; run-shell "$submit_command"
+    \; run-shell -b "$submit_command"
