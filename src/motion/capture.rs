@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ffi::OsString,
     fs::File,
     io::{BufReader, BufWriter, Write},
@@ -67,24 +68,22 @@ pub(super) fn refresh_panes_with_client(
     client: &tmux::TmuxClient,
     panes: Vec<Pane>,
 ) -> Result<Vec<Pane>> {
-    // Newer tmux popups temporarily unzoom the window while creating a
-    // floating pane. Even when the size is restored, this can reflow the
-    // underlying grid. Refresh the original panes by ID: the popup itself
-    // may now be the active pane, so listing visible panes again is unsafe.
-    let commands = panes
-        .iter()
-        .map(|pane| {
-            ["display-message", "-p", "-t", &pane.pane_id, PANE_FORMAT]
-                .into_iter()
-                .map(OsString::from)
-                .collect()
-        })
+    let Some(source) = panes.first() else {
+        return Ok(panes);
+    };
+    // Read metadata in one request, then match the original IDs and order.
+    // A newly created popup may be active; it must not enter the snapshot.
+    let output = client.stdout(["list-panes", "-t", &source.window_id, "-F", PANE_FORMAT])?;
+    let mut metadata: HashMap<_, _> = output
+        .lines()
+        .filter_map(parse_pane_line)
+        .map(|pane| (pane.pane_id.clone(), pane))
         .collect();
-    let outputs = client.stdout_many(commands)?;
     let mut refreshed = Vec::with_capacity(panes.len());
-    for (pane, output) in panes.into_iter().zip(outputs) {
-        let mut current = parse_pane_line(output.trim_end_matches('\n'))
-            .context("malformed tmux motion pane metadata")?;
+    for pane in panes {
+        let mut current = metadata
+            .remove(&pane.pane_id)
+            .with_context(|| format!("motion source pane {} disappeared or moved", pane.pane_id))?;
         current.active = pane.active;
         if current.height > 0 && current.width > 0 {
             refreshed.push(current);

@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use super::{capture::window_size, overlay_args, MotionArgs};
+use super::{overlay_args, MotionArgs};
 use crate::tmux::TmuxClient;
 
 const CLIENT_FORMAT: &str = "#{client_name}\t#{client_pid}\t#{window_id}";
@@ -186,10 +186,25 @@ pub(super) fn run(
 ) -> Result<()> {
     let client = TmuxClient::from_env()?;
     let name = target_client.context("motion requires an attached tmux client")?;
-    let owner = Owner::find(&client.stdout(["list-clients", "-F", CLIENT_FORMAT])?, name)
-        .context("motion client is no longer attached")?;
-    let session = client.stdout(["display-message", "-p", "-t", target_pane, "#{session_id}"])?;
-    let (width, height) = window_size(Some(target_window))?;
+    let initial = client.stdout([
+        "display-message",
+        "-p",
+        "-t",
+        target_pane,
+        "#{session_id}\t#{window_width}\t#{window_height}",
+        ";",
+        "list-clients",
+        "-F",
+        CLIENT_FORMAT,
+    ])?;
+    let (source, clients) = initial
+        .split_once('\n')
+        .context("missing motion source metadata")?;
+    let mut source = source.split('\t');
+    let session = source.next().context("missing motion source session")?;
+    let width = source.next().context("missing motion source width")?;
+    let height = source.next().context("missing motion source height")?;
+    let owner = Owner::find(clients, name).context("motion client is no longer attached")?;
     // A short-lived helper keeps the pane alive while it is configured.
     // Older floating-pane tmux versions do not support empty new-window.
     // Both helper and overlay use argv directly, never default-shell.
@@ -200,7 +215,7 @@ pub(super) fn run(
         "-F",
         "#{window_id}\t#{pane_id}",
         "-t",
-        &format!("{}:", session.trim()),
+        &format!("{session}:"),
         "-n",
         "motion",
         "/bin/sleep",
@@ -213,7 +228,7 @@ pub(super) fn run(
         .split_once('\t')
         .context("malformed motion window identifiers")?;
     let mut window = HintWindow {
-        linked_target: format!("{}:{window}", session.trim()),
+        linked_target: format!("{session}:{window}"),
         client,
         owner,
         source: target_window.into(),
@@ -279,9 +294,9 @@ pub(super) fn run(
                 "-t",
                 &window.window,
                 "-x",
-                &width.to_string(),
+                width,
                 "-y",
-                &height.to_string(),
+                height,
             ]),
             spawn,
         ])

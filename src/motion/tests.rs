@@ -580,6 +580,19 @@ fn refresh_panes_excludes_new_panes_and_preserves_original_active_pane() {
 }
 
 #[test]
+fn refresh_panes_rejects_a_source_pane_moved_to_another_window() {
+    let server = TestTmux::start("printf 'source_marker\\n'; sleep 60", 50, 12);
+    server.wait_for_lines(&server.pane_id, "source_marker");
+    server.split_window("sleep 60");
+    let panes = init_panes_with_client(&server.client(), Some(&server.pane_id))
+        .expect("capture source window");
+    server.stdout(&["break-pane", "-d", "-s", &server.pane_id]);
+
+    let error = refresh_panes_with_client(&server.client(), panes).unwrap_err();
+    assert!(error.to_string().contains("disappeared or moved"));
+}
+
+#[test]
 fn refresh_panes_recomputes_http_targets_after_clear_screen_redraw() {
     // A shell redraw following the popup's temporary unzoom can move the
     // visible text even after the pane has returned to its original size.
