@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Motion hints now refresh their pane content after the popup opens, avoiding
+  stale jump coordinates when tmux temporarily unzooms a pane and the shell
+  redraws cleared-screen output such as `git remote -v`.
 - Motion jumps no longer move above matches when the visible viewport starts
   in the middle of a wrapped line.
 - Motion jumps now preserve the target row when leading empty or space/tab-only

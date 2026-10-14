@@ -1,5 +1,5 @@
 use super::{
-    capture::{init_panes_with_client, MotionSnapshot},
+    capture::{init_panes_with_client, refresh_panes_with_client, MotionSnapshot},
     hints::{assign_hints_by_distance, generate_hints, hint_positions},
     matching::{find_matches, smartsign_patterns},
     navigation::{is_tab_free_content_row, move_cursor_with_client},
@@ -303,17 +303,11 @@ fn motion_snapshot_round_trips() {
     let file = tempfile::NamedTempFile::new().unwrap();
     let snapshot = MotionSnapshot {
         panes: vec![pane(&["alpha"])],
-        matches: vec![Match {
-            pane_index: 0,
-            line_no: 0,
-            visual_col: 0,
-        }],
     };
     snapshot.save(file.path()).unwrap();
 
     let loaded = MotionSnapshot::load(file.path()).unwrap();
     assert_eq!(loaded.panes[0].lines, vec!["alpha"]);
-    assert_eq!(loaded.matches[0].visual_col, 0);
 }
 
 #[test]
@@ -554,6 +548,88 @@ fn captures_every_visible_pane_with_the_correct_output() {
         .expect("right pane capture");
     assert!(left.lines.iter().any(|line| line.contains("left_marker")));
     assert!(right.lines.iter().any(|line| line.contains("right_marker")));
+}
+
+#[test]
+fn refresh_panes_excludes_new_panes_and_preserves_original_active_pane() {
+    let server = TestTmux::start("printf 'original_marker\\n'; sleep 60", 50, 12);
+    server.wait_for_lines(&server.pane_id, "original_marker");
+    let panes = init_panes_with_client(&server.client(), Some(&server.pane_id))
+        .expect("capture original pane");
+    let original_height = panes[0].height;
+    let popup = server.split_window("printf 'popup_marker\\n'; sleep 60");
+    server.wait_for_lines(&popup, "popup_marker");
+    assert_eq!(server.active_pane(), popup);
+
+    let panes = refresh_panes_with_client(&server.client(), panes).expect("refresh original pane");
+
+    assert_eq!(panes.len(), 1);
+    assert_eq!(panes[0].pane_id, server.pane_id);
+    assert!(panes[0].active);
+    assert!(panes[0].height < original_height);
+    assert_eq!(panes[0].lines.len(), panes[0].height);
+    assert!(panes[0]
+        .lines
+        .iter()
+        .any(|line| line.contains("original_marker")));
+    assert!(!panes[0]
+        .lines
+        .iter()
+        .any(|line| line.contains("popup_marker")));
+}
+
+#[test]
+fn refresh_panes_recomputes_http_targets_after_clear_screen_redraw() {
+    // A shell redraw following the popup's temporary unzoom can move the
+    // visible text even after the pane has returned to its original size.
+    let server = TestTmux::start(
+        "printf 'prompt\\ngit remote -v\\norigin\\thttps://example.test/repo (fetch)\\norigin\\thttps://example.test/repo (push)\\n'; tmux wait-for redraw; printf '\\033[H\\033[2Jprevious_prompt\\nprevious_command\\nprompt\\ngit remote -v\\norigin\\thttps://example.test/repo (fetch)\\norigin\\thttps://example.test/repo (push)\\n'; sleep 60",
+        80,
+        12,
+    );
+    server.wait_for_lines(&server.pane_id, "(push)");
+    let panes = init_panes_with_client(&server.client(), Some(&server.pane_id))
+        .expect("capture before redraw");
+    assert!(panes[0].lines[2].starts_with("origin\thttps"));
+
+    server.stdout(&["wait-for", "-S", "redraw"]);
+    server.wait_for_lines(&server.pane_id, "previous_prompt");
+    let panes = refresh_panes_with_client(&server.client(), panes).expect("refresh after redraw");
+    let matches = find_matches(
+        &panes,
+        "h",
+        CaseMode::Insensitive,
+        false,
+        TabMode::PositionAware,
+    );
+    let targets: Vec<_> = matches
+        .iter()
+        .filter(|target| target.visual_col == 8)
+        .collect();
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets[0].line_no, 4);
+    assert_eq!(targets[1].line_no, 5);
+
+    for target in targets {
+        let pane = &panes[target.pane_index];
+        let line = &pane.lines[target.line_no];
+        let true_col = true_position(line, target.visual_col, TabMode::PositionAware);
+        move_cursor_with_client(&server.client(), pane, target.line_no, true_col, None)
+            .expect("jump to refreshed HTTP target");
+
+        assert_eq!(server.copy_cursor(&server.pane_id), (8, target.line_no));
+        assert_eq!(
+            server.stdout(&[
+                "display-message",
+                "-p",
+                "-t",
+                &server.pane_id,
+                "#{copy_cursor_line}",
+            ]),
+            *line,
+        );
+        server.stdout(&["send-keys", "-X", "-t", &server.pane_id, "cancel"]);
+    }
 }
 
 #[test]

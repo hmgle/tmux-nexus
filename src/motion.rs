@@ -13,7 +13,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use capture::{init_panes, window_size, MotionSnapshot};
+use capture::{init_panes, refresh_panes, window_size, MotionSnapshot};
 use clap::{Args, ValueEnum};
 use hints::{assign_hints_by_distance, hint_positions};
 use matching::find_matches;
@@ -91,25 +91,23 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
     let target_window = resolve_target_window(args.target_window.as_deref());
     let target_client = resolve_target_client(args.target_client.as_deref());
 
-    let (panes, matches) = if let Some(path) = args.snapshot.as_deref() {
-        let snapshot = MotionSnapshot::load(path)?;
-        (snapshot.panes, snapshot.matches)
+    let panes = if let Some(path) = args.snapshot.as_deref() {
+        refresh_panes(MotionSnapshot::load(path)?.panes)?
     } else {
-        let panes = init_panes(target_window.as_deref())?;
-        let matches = find_matches(
-            &panes,
-            &pattern,
-            motion_config.case_mode,
-            motion_config.smartsign,
-            motion_config.tab_mode,
-        );
-        (panes, matches)
+        init_panes(target_window.as_deref())?
     };
     if panes.is_empty() {
         tmux::display_message("tmux-nexus motion: no visible panes");
         return Ok(());
     }
 
+    let matches = find_matches(
+        &panes,
+        &pattern,
+        motion_config.case_mode,
+        motion_config.smartsign,
+        motion_config.tab_mode,
+    );
     if matches.is_empty() {
         tmux::display_message("tmux-nexus motion: no match");
         return Ok(());
@@ -130,7 +128,6 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
             .tempfile()?;
         MotionSnapshot {
             panes: panes.clone(),
-            matches: matches.clone(),
         }
         .save(snapshot_file.path())?;
         return run_popup(

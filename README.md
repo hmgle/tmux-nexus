@@ -390,10 +390,13 @@ Motion mode uses a separate visible-screen path. It lists the panes in the
 current tmux window once, starts their independent `capture-pane` commands
 concurrently, and preserves pane order while collecting the results. It then
 searches the visible text and draws an ANSI hint overlay in a borderless tmux
-popup. Selecting a target sends the ordered window, pane, copy-mode, and cursor
-operations to tmux as one command sequence instead of starting a tmux process
-for every cursor step. Positioning keeps physical rows stable across wrapped
-continuations and tmux's position-aware tab and wide-character cells, including
+popup. After the popup opens, motion refreshes the original panes and rebuilds
+the hints so jumps use the current grid if opening the popup resized or redrew
+the underlying panes. Selecting a target sends the ordered window, pane,
+copy-mode, and cursor operations to tmux as one command sequence instead of
+starting a tmux process for every cursor step. Positioning keeps physical rows
+stable across wrapped continuations and tmux's position-aware tab and
+wide-character cells, including
 when leading empty or space/tab-only rows would otherwise make tmux snap to a
 later line's end.
 
