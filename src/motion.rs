@@ -8,7 +8,7 @@ mod window;
 
 use std::{
     collections::HashSet,
-    io,
+    io::{self, Write},
     os::fd::AsRawFd,
     path::{Path, PathBuf},
 };
@@ -68,6 +68,8 @@ pub struct MotionArgs {
     pub snapshot: Option<PathBuf>,
     #[arg(long, hide = true)]
     pub ready_title: Option<String>,
+    #[arg(long, hide = true)]
+    pub ready_file: Option<PathBuf>,
     #[arg(long = "case", value_enum)]
     pub case_mode: Option<CaseMode>,
     #[arg(long = "smartsign", conflicts_with = "no_smartsign")]
@@ -178,6 +180,7 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
             target_client: target_client.as_deref(),
             config: &motion_config,
             ready_title: args.ready_title.as_deref(),
+            ready_file: args.ready_file.as_deref(),
         },
     );
     screen.cleanup()?;
@@ -481,6 +484,7 @@ struct Overlay<'a> {
     target_client: Option<&'a str>,
     config: &'a MotionConfig,
     ready_title: Option<&'a str>,
+    ready_file: Option<&'a Path>,
 }
 
 fn run_overlay(screen: &mut AnsiScreen, overlay: Overlay<'_>) -> Result<()> {
@@ -497,6 +501,14 @@ fn run_overlay(screen: &mut AnsiScreen, overlay: Overlay<'_>) -> Result<()> {
         screen.set_title(title)?;
     }
     screen.refresh()?;
+    if let Some(path) = overlay.ready_file {
+        // Do not recreate a marker the supervisor has removed on cancellation.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .and_then(|mut file| file.write_all(b"1"))
+            .context("failed to report motion frame readiness")?;
+    }
 
     let hints_chars: HashSet<char> = overlay.config.hints.chars().collect();
     let max_hint_len = overlay

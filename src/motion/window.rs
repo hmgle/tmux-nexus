@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use tempfile::{Builder, NamedTempFile};
 
 use super::{overlay_args, MotionArgs};
 use crate::tmux::TmuxClient;
@@ -53,10 +54,19 @@ struct HintWindow {
 }
 
 impl HintWindow {
-    fn supervise(&self, ready_title: &str) -> Result<()> {
+    fn supervise(&self, ready_title: &str, ready: &NamedTempFile) -> Result<()> {
         let deadline = Instant::now() + STARTUP_TIMEOUT;
+        let mut next_check = Instant::now();
         let mut shown = false;
         loop {
+            // Waiting for Rust to prepare the frame needs no tmux request.
+            // Check liveness periodically even if the overlay never signals;
+            // the file is only a readiness hint, never an exit condition.
+            if !shown && ready.as_file().metadata()?.len() == 0 && Instant::now() < next_check {
+                thread::sleep(Duration::from_millis(2));
+                continue;
+            }
+            next_check = Instant::now() + Duration::from_millis(50);
             // One tmux request reads both the process state and its owner.
             // A killed pane/window (or server) is cancellation, not a wait
             // for a completion signal which can no longer arrive.
@@ -185,6 +195,7 @@ pub(super) fn run(
     snapshot_path: &Path,
 ) -> Result<()> {
     let client = TmuxClient::from_env()?;
+    let ready = Builder::new().prefix("tnx_motion_ready.").tempfile()?;
     let name = target_client.context("motion requires an attached tmux client")?;
     let initial = client.stdout([
         "display-message",
@@ -254,6 +265,7 @@ pub(super) fn run(
         .map(OsString::from),
     );
     spawn.extend(["--ready-title".into(), title.clone().into()]);
+    spawn.extend(["--ready-file".into(), ready.path().as_os_str().to_owned()]);
     let result = window
         .client
         .run_commands(&[
@@ -300,7 +312,7 @@ pub(super) fn run(
             ]),
             spawn,
         ])
-        .and_then(|()| window.supervise(&title));
+        .and_then(|()| window.supervise(&title, &ready));
     let cleanup = window.cleanup();
     result.and(cleanup)
 }
