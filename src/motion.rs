@@ -79,6 +79,14 @@ pub struct MotionArgs {
 }
 
 pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
+    run_motion(&args, config)?;
+    if let Some(path) = args.ready_file.as_deref() {
+        window::finish(path)?;
+    }
+    Ok(())
+}
+
+fn run_motion(args: &MotionArgs, config: &Config) -> Result<()> {
     let mut motion_config = MotionConfig::from_config(config);
     if let Some(case_mode) = args.case_mode {
         motion_config.case_mode = case_mode;
@@ -90,7 +98,7 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
         motion_config.smartsign = false;
     }
 
-    let Some(pattern) = resolve_pattern(&args, args.kind.pattern_len()) else {
+    let Some(pattern) = resolve_pattern(args, args.kind.pattern_len()) else {
         return Ok(());
     };
     let target_window = resolve_target_window(args.target_window.as_deref());
@@ -123,6 +131,7 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
             &matches[0],
             motion_config.tab_mode,
             target_client.as_deref(),
+            args.ready_file.is_none(),
         )?;
         return Ok(());
     }
@@ -136,7 +145,7 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
         }
         .save(snapshot_file.path())?;
         return run_popup(
-            &args,
+            args,
             &pattern,
             target_window.as_deref(),
             target_popup_pane(&panes).as_deref(),
@@ -167,7 +176,9 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
         .map(|pane| pane.start_x + pane.width)
         .max()
         .unwrap_or(window_width);
-    let mut screen = AnsiScreen::new(&motion_config);
+    // A supervised window stays hidden-cursor until it is removed; restoring
+    // its cursor would flash over the hints before the source is exposed.
+    let mut screen = AnsiScreen::new(&motion_config, args.ready_file.is_none());
     screen.init()?;
     let result = run_overlay(
         &mut screen,
@@ -541,6 +552,7 @@ fn run_overlay(screen: &mut AnsiScreen, overlay: Overlay<'_>) -> Result<()> {
                 target,
                 overlay.config.tab_mode,
                 overlay.target_client,
+                overlay.ready_file.is_none(),
             )?;
             return Ok(());
         }

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Motion returns from hint windows with a single redraw of the positioned
+  cursor, without waiting for the next tmux liveness poll or redrawing the
+  source again when the hint window is removed.
 - Motion hint windows are prepared before display and cleaned up when their
   pane exits, the client detaches, or the user changes windows. Cleanup no
   longer depends on shell completion signals, steals focus, or renumbers

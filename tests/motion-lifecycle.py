@@ -182,13 +182,15 @@ class UI:
 
 
 def check_lifecycle():
-    for action in ("cancel", "kill-window", "kill-pane", "sigkill", "detach", "switch",
+    for action in ("select", "cancel", "kill-window", "kill-pane", "sigkill", "detach", "switch",
                    "bad-snapshot", "startup-timeout", "detach-starting"):
         with UI() as ui:
             fault = action if action in ("bad-snapshot", "startup-timeout", "detach-starting") else None
             ui.launch(fault)
-            if action == "cancel":
-                ui.tmux("send-keys", "-t", ui.overlay_pane, "Escape")
+            if action in ("select", "cancel"):
+                ui.drain(0.1)
+                ui.output.clear()
+                os.write(ui.master, b"a" if action == "select" else b"\x1b")
             elif action in ("kill-window", "kill-pane"):
                 ui.tmux(action, "-t", ui.overlay_pane)
             elif action == "sigkill":
@@ -201,6 +203,18 @@ def check_lifecycle():
             expected = ui.other if action == "switch" else ui.source
             error = {"sigkill": "signal", "bad-snapshot": "failed to parse", "startup-timeout": "startup timed out"}.get(action)
             ui.finished(expected, error, timeout=8, renumbered=action in ("kill-window", "kill-pane"))
+            if action in ("select", "cancel"):
+                ui.drain(0.15)
+                # Observe the terminal, not just tmux's final cursor state:
+                # returning and later unlinking used to redraw the source
+                # twice, hiding and restoring its cursor a second time.
+                assert ui.output.count(b"origin  https://example.test/repo (fetch)") == 1, "source redrawn again after selection"
+                assert b"Pane is dead" not in ui.output, "dead overlay flashed before returning"
+            if action == "select":
+                assert ui.tmux("display", "-p", "-t", ui.pane, "#{copy_cursor_x},#{copy_cursor_y}") == "8,1"
+                assert b"\x1b[2;9H" in ui.output, "target cursor wasn't rendered"
+                assert ui.output.count(b"\x1b[?25h") == 1, "cursor flashed or wasn't shown"
+                assert ui.output.rfind(b"\x1b[?25h") > ui.output.rfind(b"\x1b[?25l"), "target cursor stayed hidden"
             if action in ("detach", "detach-starting"):
                 ui.attach()
                 assert ui.tmux("display", "-p", "#{window_id}") == ui.source

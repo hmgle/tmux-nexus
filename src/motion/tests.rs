@@ -626,7 +626,7 @@ fn refresh_panes_recomputes_http_targets_after_clear_screen_redraw() {
         let pane = &panes[target.pane_index];
         let line = &pane.lines[target.line_no];
         let true_col = true_position(line, target.visual_col, tab_mode);
-        move_cursor_with_client(&server.client(), pane, target.line_no, true_col, None)
+        move_cursor_with_client(&server.client(), pane, target.line_no, true_col, None, true)
             .expect("jump to refreshed HTTP target");
 
         assert_eq!(server.copy_cursor(&server.pane_id), (8, target.line_no));
@@ -650,9 +650,27 @@ fn move_cursor_positions_same_pane() {
     let lines = server.wait_for_lines(&server.pane_id, "line2_target");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, 2, 7, None).expect("same-pane cursor move");
+    move_cursor_with_client(&server.client(), &pane, 2, 7, None, true)
+        .expect("same-pane cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (7, 2));
+}
+
+#[test]
+fn move_cursor_can_position_without_exposing_source_window() {
+    let server = TestTmux::start("printf 'line0\\nline1_target\\n'; sleep 60", 30, 10);
+    let lines = server.wait_for_lines(&server.pane_id, "line1_target");
+    let pane = server.pane(&server.pane_id, lines);
+    let overlay = server.stdout(&["new-window", "-P", "-F", "#{window_id}", "sleep 60"]);
+
+    move_cursor_with_client(&server.client(), &pane, 1, 6, None, false)
+        .expect("position behind hint window");
+
+    assert_eq!(server.copy_cursor(&server.pane_id), (6, 1));
+    assert_eq!(
+        server.stdout(&["display-message", "-p", "#{window_id}"]),
+        overlay
+    );
 }
 
 #[test]
@@ -670,7 +688,7 @@ fn move_cursor_handles_wrapped_continuation_at_top() {
     assert!(target_line >= 2, "expected wrapped rows above target");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 0, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 0, None, true)
         .expect("wrapped continuation cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
@@ -694,7 +712,8 @@ fn move_cursor_selects_cross_pane_target() {
     let lines = server.wait_for_lines(&pane2, "line1_target");
     let pane = server.pane(&pane2, lines);
 
-    move_cursor_with_client(&server.client(), &pane, 1, 6, None).expect("cross-pane cursor move");
+    move_cursor_with_client(&server.client(), &pane, 1, 6, None, true)
+        .expect("cross-pane cursor move");
 
     assert_eq!(server.active_pane(), pane2);
     assert_eq!(server.copy_cursor(&pane.pane_id), (6, 1));
@@ -710,7 +729,7 @@ fn move_cursor_handles_leading_empty_rows() {
         .expect("target line");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 0, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 0, None, true)
         .expect("leading-empty cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
@@ -731,7 +750,7 @@ fn move_cursor_handles_indented_row_before_target() {
     assert_eq!(target_line, 2);
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 3, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 3, None, true)
         .expect("indented row cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (3, target_line));
@@ -752,7 +771,7 @@ fn move_cursor_handles_tab_indented_row_before_target() {
     assert_eq!(target_line, 2);
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 3, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 3, None, true)
         .expect("tab-indented row cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (3, target_line));
@@ -776,7 +795,7 @@ fn move_cursor_skips_tab_indented_wrapped_anchor() {
     assert_eq!(lines[1].trim_start_matches([' ', '\t']), "code");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 7, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 7, None, true)
         .expect("tab-wrapped anchor cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (7, target_line));
@@ -803,7 +822,7 @@ fn move_cursor_anchors_on_single_character_tail_row() {
     assert_eq!(lines[1], "x");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 3, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 3, None, true)
         .expect("single-character tail anchor cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (3, target_line));
@@ -848,8 +867,15 @@ fn move_cursor_lands_on_tab_run_for_tab_match() {
     let true_col = true_position(line, target.visual_col, tab_mode);
     assert_eq!(true_col, 0);
 
-    move_cursor_with_client(&server.client(), &pane, target.line_no, true_col, None)
-        .expect("tab match cursor move");
+    move_cursor_with_client(
+        &server.client(),
+        &pane,
+        target.line_no,
+        true_col,
+        None,
+        true,
+    )
+    .expect("tab match cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (7, target_line));
     assert_eq!(
@@ -876,7 +902,7 @@ fn move_cursor_ignores_pure_space_and_tab_rows_as_anchors() {
     assert!(lines[1].chars().all(|ch| matches!(ch, ' ' | '\t')));
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 3, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 3, None, true)
         .expect("pure whitespace row cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (3, target_line));
@@ -893,7 +919,7 @@ fn move_cursor_preserves_matches_inside_indentation() {
     assert_eq!(target_line, 1);
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 1, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 1, None, true)
         .expect("indented match cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (1, target_line));
@@ -910,7 +936,7 @@ fn move_cursor_handles_wrapped_empty_continuation_before_target() {
     assert_eq!(target_line, 1, "expected target on wrapped continuation");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 7, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 7, None, true)
         .expect("wrapped-empty cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (7, target_line));
@@ -937,7 +963,7 @@ fn move_cursor_handles_indented_wrapped_empty_continuation() {
     assert_eq!(target_line, 1, "expected target on wrapped continuation");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 2, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 2, None, true)
         .expect("indented wrapped-empty cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (2, target_line));
@@ -968,7 +994,7 @@ fn move_cursor_normalizes_tabs_without_crossing_rows() {
     let pane = server.pane(&server.pane_id, lines);
 
     let true_col = true_position(&pane.lines[target_line], 8, detect_tmux_tab_mode());
-    move_cursor_with_client(&server.client(), &pane, target_line, true_col, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, true_col, None, true)
         .expect("tab cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (8, target_line));
@@ -998,7 +1024,7 @@ fn move_cursor_normalizes_wide_cells_without_crossing_rows() {
         .expect("wide target line");
     let pane = server.pane(&server.pane_id, lines);
 
-    move_cursor_with_client(&server.client(), &pane, target_line, 0, None)
+    move_cursor_with_client(&server.client(), &pane, target_line, 0, None, true)
         .expect("wide cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (0, target_line));
@@ -1043,7 +1069,7 @@ fn move_cursor_handles_wrapped_target_line() {
     let line = &pane.lines[target.line_no];
     let true_col = true_position(line, target.visual_col, TabMode::PositionAware);
 
-    move_cursor_with_client(&server.client(), pane, target.line_no, true_col, None)
+    move_cursor_with_client(&server.client(), pane, target.line_no, true_col, None, true)
         .expect("wrapped target cursor move");
 
     assert_eq!(server.copy_cursor(&server.pane_id), (2, 5));

@@ -22,16 +22,18 @@ pub(super) struct AnsiScreen {
     hint2: String,
     buffer: String,
     active: bool,
+    restore_cursor: bool,
 }
 
 impl AnsiScreen {
-    pub(super) fn new(config: &MotionConfig) -> Self {
+    pub(super) fn new(config: &MotionConfig, restore_cursor: bool) -> Self {
         Self {
             dim: format!("\x1b[{}m", config.dim),
             hint1: format!("\x1b[{}m", config.hint1_fg),
             hint2: format!("\x1b[{}m", config.hint2_fg),
             buffer: String::with_capacity(4096),
             active: false,
+            restore_cursor,
         }
     }
 
@@ -55,7 +57,10 @@ impl AnsiScreen {
             stdout.write_all(self.buffer.as_bytes())?;
             self.buffer.clear();
         }
-        stdout.write_all(b"\x1b[0m\x1b[?25h")?;
+        stdout.write_all(b"\x1b[0m")?;
+        if self.restore_cursor {
+            stdout.write_all(b"\x1b[?25h")?;
+        }
         stdout.flush()?;
         self.active = false;
         Ok(())

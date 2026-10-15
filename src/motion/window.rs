@@ -16,6 +16,23 @@ use crate::tmux::TmuxClient;
 const CLIENT_FORMAT: &str = "#{client_name}\t#{client_pid}\t#{window_id}";
 const PANE_FORMAT: &str = "#{pane_dead}\t#{pane_dead_status}\t#{pane_dead_signal}\t#{pane_title}";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+// The overlay sets this length only after a successful return, including
+// terminal cleanup. A failed or killed overlay still needs liveness checks.
+const FINISHED: u64 = 2;
+
+pub(super) fn finish(path: &Path) -> Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .and_then(|file| file.set_len(FINISHED))
+        .context("failed to report motion completion")?;
+    // Keep the displayed pane alive until the supervisor unlinks it. Exiting
+    // here would briefly render tmux's dead-pane banner over the hint frame.
+    while path.exists() {
+        thread::sleep(Duration::from_millis(50));
+    }
+    Ok(())
+}
 
 struct Owner {
     name: String,
@@ -59,10 +76,13 @@ impl HintWindow {
         let mut next_check = Instant::now();
         let mut shown = false;
         loop {
-            // Waiting for Rust to prepare the frame needs no tmux request.
-            // Check liveness periodically even if the overlay never signals;
-            // the file is only a readiness hint, never an exit condition.
-            if !shown && ready.as_file().metadata()?.len() == 0 && Instant::now() < next_check {
+            let state = ready.as_file().metadata()?.len();
+            if state == FINISHED {
+                return Ok(());
+            }
+            // Poll local readiness/completion between periodic tmux liveness
+            // checks. Normal completion must not wait for the next 50ms poll.
+            if (shown || state == 0) && Instant::now() < next_check {
                 thread::sleep(Duration::from_millis(2));
                 continue;
             }
@@ -93,8 +113,8 @@ impl HintWindow {
                 &self.owner.window
             };
             if &owner.window != expected {
-                // Navigation also returns to the source. Never pull a client
-                // back after it has deliberately selected another window.
+                // Never pull a client back after it has deliberately
+                // selected another window.
                 return Ok(());
             }
             let mut fields = pane.splitn(4, '\t');
@@ -132,11 +152,7 @@ impl HintWindow {
                     );
                 }
             }
-            thread::sleep(if shown {
-                Duration::from_millis(50)
-            } else {
-                Duration::from_millis(5)
-            });
+            thread::sleep(Duration::from_millis(2));
         }
     }
 
@@ -144,17 +160,21 @@ impl HintWindow {
         let clients = self
             .client
             .try_stdout(["list-clients", "-F", CLIENT_FORMAT]);
-        let restore = if clients
+        let mut commands = Vec::new();
+        if clients
             .as_deref()
             .and_then(|s| self.owner.current(s))
             .is_some_and(|owner| owner.window == self.window)
         {
-            self.client
-                .run(["switch-client", "-c", &self.owner.name, "-t", &self.source])
-        } else {
-            Ok(())
-        };
-        let remove = if self
+            commands.push(strings(&[
+                "switch-client",
+                "-c",
+                &self.owner.name,
+                "-t",
+                &self.source,
+            ]));
+        }
+        let remove = self
             .client
             .try_stdout([
                 "display-message",
@@ -164,16 +184,23 @@ impl HintWindow {
                 "#{window_id}",
             ])
             .as_deref()
-            == Some(&self.window)
-        {
+            == Some(&self.window);
+        if remove {
             // Unlike kill-window, unlink does not renumber the user's windows.
-            self.client
+            commands.push(strings(&["unlink-window", "-k", "-t", &self.linked_target]));
+        }
+        // Expose the final cursor and remove the hint window in one server
+        // command sequence, avoiding a second full redraw after returning.
+        let result = self.client.run_commands(&commands);
+        self.cleaned = result.is_ok();
+        if result.is_err() && remove {
+            // Still remove the overlay if restoring a vanished source fails.
+            self.cleaned = self
+                .client
                 .run(["unlink-window", "-k", "-t", &self.linked_target])
-        } else {
-            Ok(())
-        };
-        self.cleaned = remove.is_ok();
-        restore.and(remove)
+                .is_ok();
+        }
+        result
     }
 }
 

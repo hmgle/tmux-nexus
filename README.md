@@ -396,6 +396,9 @@ source pane and reflow its content. The temporary window is displayed only
 after tmux has received its complete hint screen. It is removed after selection,
 cancellation, client detachment, or switching to another window, without
 renumbering existing windows or pulling the client back from another window.
+Normal completion signals the supervisor immediately; switching back and
+removing the hint window share one command sequence so the positioned cursor
+is rendered without a second source-window redraw.
 Motion refreshes the original panes before drawing the hints: after popup
 creation on older tmux, or while the hint window is still hidden on newer tmux.
 Selecting a target sends
