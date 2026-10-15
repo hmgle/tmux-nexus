@@ -252,6 +252,12 @@ fn run_popup(
     let exe = std::env::current_exe().context("failed to resolve current executable")?;
     // Older list-commands treats the argument as a glob and succeeds even
     // when nothing matches. Exit status alone is not a capability check.
+    // Floating popups can unzoom and resize the source on open AND close,
+    // discarding lower rows even if its final size and zoom flag are intact.
+    // Use a separate window on all floating-pane versions, including 3.7c
+    // where the minimal content-loss case does not reproduce. Track the zoom
+    // rework at https://github.com/tmux/tmux/pull/5668 before relaxing this;
+    // docs/tmux-compatibility.md records the evidence and regression coverage.
     if tmux::try_stdout(["list-commands", "new-pane"])
         .is_some_and(|commands| commands.lines().any(|line| line.starts_with("new-pane ")))
     {

@@ -390,9 +390,12 @@ Motion mode uses a separate visible-screen path. It lists the panes in the
 current tmux window once, starts their independent `capture-pane` commands
 concurrently, and preserves pane order while collecting the results. It then
 searches the visible text and draws an ANSI hint overlay in a borderless tmux
-popup. On tmux versions with floating panes, motion uses a temporary window
-instead: opening and closing a floating popup would temporarily unzoom the
-source pane and reflow its content. The temporary window is displayed only
+popup. On tmux versions with floating panes (detected via `new-pane`), motion
+uses a temporary window to avoid popup-induced unzoom and content reflow. On
+affected tmux master builds this can permanently discard lower rows, even when
+the final pane dimensions and zoom flag are unchanged. See the
+[tmux compatibility notes](docs/tmux-compatibility.md) for reproduction details
+and the related upstream zoom rework. The temporary window is displayed only
 after tmux has received its complete hint screen. It is removed after selection,
 cancellation, client detachment, or switching to another window, without
 renumbering existing windows or pulling the client back from another window.
