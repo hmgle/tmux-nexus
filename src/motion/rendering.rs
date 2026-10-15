@@ -49,7 +49,7 @@ pub(super) fn draw_all_panes(
             )?;
         }
     }
-    screen.refresh()
+    Ok(())
 }
 
 pub(super) fn draw_all_hints(
@@ -71,7 +71,7 @@ pub(super) fn draw_all_hints(
             )?;
         }
     }
-    screen.refresh()
+    Ok(())
 }
 
 pub(super) fn update_hints_display(

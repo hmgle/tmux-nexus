@@ -22,24 +22,32 @@ pub(super) struct AnsiScreen {
     hint2: String,
     buffer: String,
     active: bool,
+    restore_cursor: bool,
 }
 
 impl AnsiScreen {
-    pub(super) fn new(config: &MotionConfig) -> Self {
+    pub(super) fn new(config: &MotionConfig, restore_cursor: bool) -> Self {
         Self {
             dim: format!("\x1b[{}m", config.dim),
             hint1: format!("\x1b[{}m", config.hint1_fg),
             hint2: format!("\x1b[{}m", config.hint2_fg),
             buffer: String::with_capacity(4096),
             active: false,
+            restore_cursor,
         }
     }
 
     pub(super) fn init(&mut self) -> Result<()> {
-        let mut stdout = io::stdout().lock();
-        stdout.write_all(b"\x1b[?25l\x1b[2J")?;
-        stdout.flush()?;
+        self.buffer.push_str("\x1b[?25l\x1b[2J");
         self.active = true;
+        Ok(())
+    }
+
+    // The title follows the complete frame in the same PTY byte stream. The
+    // supervisor waits for tmux to parse it before exposing the window.
+    pub(super) fn set_title(&mut self, title: &str) -> Result<()> {
+        anyhow::ensure!(!title.chars().any(char::is_control), "invalid motion title");
+        write!(self.buffer, "\x1b]2;{title}\x07")?;
         Ok(())
     }
 
@@ -49,7 +57,10 @@ impl AnsiScreen {
             stdout.write_all(self.buffer.as_bytes())?;
             self.buffer.clear();
         }
-        stdout.write_all(b"\x1b[0m\x1b[?25h")?;
+        stdout.write_all(b"\x1b[0m")?;
+        if self.restore_cursor {
+            stdout.write_all(b"\x1b[?25h")?;
+        }
         stdout.flush()?;
         self.active = false;
         Ok(())

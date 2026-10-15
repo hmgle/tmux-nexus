@@ -7,12 +7,40 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tmux: system
+            motion-backend: popup
+          - tmux: 3.7c
+            motion-backend: window
+    env:
+      TNX_TEST_MOTION_BACKEND: ${{ matrix.motion-backend }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v6
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck tmux fzf
+      - name: Build tmux with floating panes
+        if: matrix.tmux != 'system'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get install -y libevent-dev libncurses-dev bison
+          cd "$RUNNER_TEMP"
+          gh release download 3.7c --repo tmux/tmux --pattern tmux-3.7c.tar.gz
+          echo '7c60cae9a0e25288e2e24750aafc9e8800fc7fd4555e447e1b29ee4201cfb3bf  tmux-3.7c.tar.gz' | sha256sum --check
+          tar -xzf tmux-3.7c.tar.gz
+          cd tmux-3.7c
+          ./configure --prefix="$RUNNER_TEMP/tmux-install"
+          make -j2
+          make install
+          echo "$RUNNER_TEMP/tmux-install/bin" >> "$GITHUB_PATH"
+      - name: Report tmux version
+        run: tmux -V
       - name: Run shellcheck
         run: |
           shellcheck -x --source-path=SCRIPTDIR \
@@ -34,5 +62,10 @@ jobs:
         run: cargo build --locked
       - name: Run tmux integration tests
         run: bash tests/tmux-integration.sh
+      - name: Run motion integration tests
+        run: uv run --no-project python tests/motion-integration.py
+      - name: Run motion lifecycle tests
+        if: matrix.motion-backend == 'window'
+        run: uv run --no-project python tests/motion-lifecycle.py
       - name: Run manager integration tests
         run: bash tests/manage-integration.sh

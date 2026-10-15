@@ -4,16 +4,17 @@ mod matching;
 mod navigation;
 mod rendering;
 mod terminal;
+mod window;
 
 use std::{
     collections::HashSet,
-    io,
+    io::{self, Write},
     os::fd::AsRawFd,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
-use capture::{init_panes, window_size, MotionSnapshot};
+use capture::{init_panes, refresh_panes, window_size, MotionSnapshot};
 use clap::{Args, ValueEnum};
 use hints::{assign_hints_by_distance, hint_positions};
 use matching::find_matches;
@@ -65,6 +66,10 @@ pub struct MotionArgs {
     pub overlay: bool,
     #[arg(long = "snapshot", hide = true)]
     pub snapshot: Option<PathBuf>,
+    #[arg(long, hide = true)]
+    pub ready_title: Option<String>,
+    #[arg(long, hide = true)]
+    pub ready_file: Option<PathBuf>,
     #[arg(long = "case", value_enum)]
     pub case_mode: Option<CaseMode>,
     #[arg(long = "smartsign", conflicts_with = "no_smartsign")]
@@ -74,6 +79,14 @@ pub struct MotionArgs {
 }
 
 pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
+    run_motion(&args, config)?;
+    if let Some(path) = args.ready_file.as_deref() {
+        window::finish(path)?;
+    }
+    Ok(())
+}
+
+fn run_motion(args: &MotionArgs, config: &Config) -> Result<()> {
     let mut motion_config = MotionConfig::from_config(config);
     if let Some(case_mode) = args.case_mode {
         motion_config.case_mode = case_mode;
@@ -85,31 +98,29 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
         motion_config.smartsign = false;
     }
 
-    let Some(pattern) = resolve_pattern(&args, args.kind.pattern_len()) else {
+    let Some(pattern) = resolve_pattern(args, args.kind.pattern_len()) else {
         return Ok(());
     };
     let target_window = resolve_target_window(args.target_window.as_deref());
     let target_client = resolve_target_client(args.target_client.as_deref());
 
-    let (panes, matches) = if let Some(path) = args.snapshot.as_deref() {
-        let snapshot = MotionSnapshot::load(path)?;
-        (snapshot.panes, snapshot.matches)
+    let panes = if let Some(path) = args.snapshot.as_deref() {
+        refresh_panes(MotionSnapshot::load(path)?.panes)?
     } else {
-        let panes = init_panes(target_window.as_deref())?;
-        let matches = find_matches(
-            &panes,
-            &pattern,
-            motion_config.case_mode,
-            motion_config.smartsign,
-            motion_config.tab_mode,
-        );
-        (panes, matches)
+        init_panes(target_window.as_deref())?
     };
     if panes.is_empty() {
         tmux::display_message("tmux-nexus motion: no visible panes");
         return Ok(());
     }
 
+    let matches = find_matches(
+        &panes,
+        &pattern,
+        motion_config.case_mode,
+        motion_config.smartsign,
+        motion_config.tab_mode,
+    );
     if matches.is_empty() {
         tmux::display_message("tmux-nexus motion: no match");
         return Ok(());
@@ -120,6 +131,7 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
             &matches[0],
             motion_config.tab_mode,
             target_client.as_deref(),
+            args.ready_file.is_none(),
         )?;
         return Ok(());
     }
@@ -130,11 +142,10 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
             .tempfile()?;
         MotionSnapshot {
             panes: panes.clone(),
-            matches: matches.clone(),
         }
         .save(snapshot_file.path())?;
         return run_popup(
-            &args,
+            args,
             &pattern,
             target_window.as_deref(),
             target_popup_pane(&panes).as_deref(),
@@ -165,7 +176,9 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
         .map(|pane| pane.start_x + pane.width)
         .max()
         .unwrap_or(window_width);
-    let mut screen = AnsiScreen::new(&motion_config);
+    // A supervised window stays hidden-cursor until it is removed; restoring
+    // its cursor would flash over the hints before the source is exposed.
+    let mut screen = AnsiScreen::new(&motion_config, args.ready_file.is_none());
     screen.init()?;
     let result = run_overlay(
         &mut screen,
@@ -177,6 +190,8 @@ pub fn run(args: MotionArgs, config: &Config) -> Result<()> {
             terminal_height,
             target_client: target_client.as_deref(),
             config: &motion_config,
+            ready_title: args.ready_title.as_deref(),
+            ready_file: args.ready_file.as_deref(),
         },
     );
     screen.cleanup()?;
@@ -235,6 +250,27 @@ fn run_popup(
     let target_window = target_window.context("motion target window not found")?;
     let target_pane = target_pane.context("motion target pane not found")?;
     let exe = std::env::current_exe().context("failed to resolve current executable")?;
+    // Older list-commands treats the argument as a glob and succeeds even
+    // when nothing matches. Exit status alone is not a capability check.
+    // Floating popups can unzoom and resize the source on open AND close,
+    // discarding lower rows even if its final size and zoom flag are intact.
+    // Use a separate window on all floating-pane versions, including 3.7c
+    // where the minimal content-loss case does not reproduce. Track the zoom
+    // rework at https://github.com/tmux/tmux/pull/5668 before relaxing this;
+    // docs/tmux-compatibility.md records the evidence and regression coverage.
+    if tmux::try_stdout(["list-commands", "new-pane"])
+        .is_some_and(|commands| commands.lines().any(|line| line.starts_with("new-pane ")))
+    {
+        return window::run(
+            exe.to_string_lossy().as_ref(),
+            args,
+            pattern,
+            target_window,
+            target_pane,
+            target_client,
+            snapshot_path,
+        );
+    }
     tmux::run(popup_command(
         exe.to_string_lossy().as_ref(),
         args,
@@ -263,33 +299,14 @@ fn popup_command(
     target_client: Option<&str>,
     snapshot_path: &Path,
 ) -> Vec<String> {
-    let mut command = vec![
-        shell_quote(exe),
-        "motion".into(),
-        args.kind.as_str().into(),
-        "--query".into(),
-        shell_quote(pattern),
-        "--target-window".into(),
-        shell_quote(target_window),
-        "--overlay".into(),
-        "--snapshot".into(),
-        shell_quote(&snapshot_path.to_string_lossy()),
-    ];
-    if let Some(target_client) = target_client {
-        command.push("--target-client".into());
-        command.push(shell_quote(target_client));
-    }
-    if let Some(case_mode) = args.case_mode {
-        command.push("--case".into());
-        command.push(case_mode.to_string());
-    }
-    if args.smartsign {
-        command.push("--smartsign".into());
-    }
-    if args.no_smartsign {
-        command.push("--no-smartsign".into());
-    }
-
+    let command = overlay_args(
+        exe,
+        args,
+        pattern,
+        target_window,
+        target_client,
+        snapshot_path,
+    );
     let mut popup = vec![
         "display-popup".to_string(),
         "-E".to_string(),
@@ -305,8 +322,52 @@ fn popup_command(
         popup.push("-c".to_string());
         popup.push(target_client.to_string());
     }
-    popup.push(command.join(" "));
+    popup.push(
+        command
+            .iter()
+            .map(|arg| shell_quote(arg))
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
     popup
+}
+
+fn overlay_args(
+    exe: &str,
+    args: &MotionArgs,
+    pattern: &str,
+    target_window: &str,
+    target_client: Option<&str>,
+    snapshot_path: &Path,
+) -> Vec<String> {
+    let mut command = vec![
+        exe.to_string(),
+        "motion".into(),
+        args.kind.as_str().into(),
+        "--query".into(),
+        pattern.to_string(),
+        "--target-window".into(),
+        target_window.to_string(),
+        "--overlay".into(),
+        "--snapshot".into(),
+        snapshot_path.to_string_lossy().into_owned(),
+    ];
+    if let Some(target_client) = target_client {
+        command.push("--target-client".into());
+        command.push(target_client.to_string());
+    }
+    if let Some(case_mode) = args.case_mode {
+        command.push("--case".into());
+        command.push(case_mode.to_string());
+    }
+    if args.smartsign {
+        command.push("--smartsign".into());
+    }
+    if args.no_smartsign {
+        command.push("--no-smartsign".into());
+    }
+
+    command
 }
 
 #[derive(Clone, Debug)]
@@ -439,9 +500,12 @@ struct Overlay<'a> {
     terminal_height: usize,
     target_client: Option<&'a str>,
     config: &'a MotionConfig,
+    ready_title: Option<&'a str>,
+    ready_file: Option<&'a Path>,
 }
 
 fn run_overlay(screen: &mut AnsiScreen, overlay: Overlay<'_>) -> Result<()> {
+    let _raw = RawMode::new()?;
     draw_all_panes(
         screen,
         overlay.panes,
@@ -450,6 +514,18 @@ fn run_overlay(screen: &mut AnsiScreen, overlay: Overlay<'_>) -> Result<()> {
         overlay.config,
     )?;
     draw_all_hints(screen, overlay.positions, overlay.terminal_height)?;
+    if let Some(title) = overlay.ready_title {
+        screen.set_title(title)?;
+    }
+    screen.refresh()?;
+    if let Some(path) = overlay.ready_file {
+        // Do not recreate a marker the supervisor has removed on cancellation.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .and_then(|mut file| file.write_all(b"1"))
+            .context("failed to report motion frame readiness")?;
+    }
 
     let hints_chars: HashSet<char> = overlay.config.hints.chars().collect();
     let max_hint_len = overlay
@@ -459,7 +535,6 @@ fn run_overlay(screen: &mut AnsiScreen, overlay: Overlay<'_>) -> Result<()> {
         .max()
         .unwrap_or_default();
     let mut key_sequence = String::new();
-    let _raw = RawMode::new()?;
     let mut stdin = io::stdin();
     loop {
         let ch = read_key(&mut stdin)?;
@@ -483,6 +558,7 @@ fn run_overlay(screen: &mut AnsiScreen, overlay: Overlay<'_>) -> Result<()> {
                 target,
                 overlay.config.tab_mode,
                 overlay.target_client,
+                overlay.ready_file.is_none(),
             )?;
             return Ok(());
         }

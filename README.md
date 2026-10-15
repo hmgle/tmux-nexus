@@ -390,12 +390,26 @@ Motion mode uses a separate visible-screen path. It lists the panes in the
 current tmux window once, starts their independent `capture-pane` commands
 concurrently, and preserves pane order while collecting the results. It then
 searches the visible text and draws an ANSI hint overlay in a borderless tmux
-popup. Selecting a target sends the ordered window, pane, copy-mode, and cursor
-operations to tmux as one command sequence instead of starting a tmux process
-for every cursor step. Positioning keeps physical rows stable across wrapped
-continuations and tmux's position-aware tab and wide-character cells, including
-when leading empty or space/tab-only rows would otherwise make tmux snap to a
-later line's end.
+popup. On tmux versions with floating panes (detected via `new-pane`), motion
+uses a temporary window to avoid popup-induced unzoom and content reflow. On
+affected tmux master builds this can permanently discard lower rows, even when
+the final pane dimensions and zoom flag are unchanged. See the
+[tmux compatibility notes](docs/tmux-compatibility.md) for reproduction details
+and the related upstream zoom rework. The temporary window is displayed only
+after tmux has received its complete hint screen. It is removed after selection,
+cancellation, client detachment, or switching to another window, without
+renumbering existing windows or pulling the client back from another window.
+Normal completion signals the supervisor immediately; switching back and
+removing the hint window share one command sequence so the positioned cursor
+is rendered without a second source-window redraw.
+Motion refreshes the original panes before drawing the hints: after popup
+creation on older tmux, or while the hint window is still hidden on newer tmux.
+Selecting a target sends
+the ordered window, pane, copy-mode, and cursor operations to tmux as one
+command sequence instead of starting a tmux process for every cursor step.
+Positioning keeps physical rows stable across wrapped continuations and tmux's
+position-aware tab and wide-character cells, including when leading empty or
+space/tab-only rows would otherwise make tmux snap to a later line's end.
 
 ## Development
 
@@ -410,11 +424,18 @@ bash tests/launcher.sh
 bash tests/install-binary.sh
 env -u TMUX -u TMUX_PANE bash tests/shell-quoting.sh
 env -u TMUX -u TMUX_PANE bash tests/tmux-integration.sh
+uv run --no-project python tests/motion-integration.py
 env -u TMUX -u TMUX_PANE bash tests/manage-integration.sh
 ```
 
 The tmux integration tests require `tmux`; picker workflows and CI also require
-`fzf`. Every test server uses its own explicit tmux socket.
+`fzf`. The motion terminal test uses `uv` and Python's standard library. Every
+test server uses its own explicit tmux socket.
+
+On tmux with floating panes, also run
+`uv run --no-project python tests/motion-lifecycle.py` to exercise startup
+failure, pane termination, detachment, and first-frame readiness. CI tests both
+the system tmux popup backend and the window backend on pinned tmux 3.7c.
 
 Use `./tnx doctor` to verify local dependencies and resolved
 configuration.

@@ -10,6 +10,7 @@ pub(super) fn move_to_match(
     target: &Match,
     tab_mode: TabMode,
     target_client: Option<&str>,
+    activate_window: bool,
 ) -> Result<()> {
     let pane = panes
         .get(target.pane_index)
@@ -19,7 +20,13 @@ pub(super) fn move_to_match(
         .get(target.line_no)
         .context("motion target line not found")?;
     let true_col = true_position(line, target.visual_col, tab_mode);
-    move_cursor(pane, target.line_no, true_col, target_client)
+    move_cursor(
+        pane,
+        target.line_no,
+        true_col,
+        target_client,
+        activate_window,
+    )
 }
 
 fn move_cursor(
@@ -27,9 +34,17 @@ fn move_cursor(
     line_no: usize,
     true_col: usize,
     target_client: Option<&str>,
+    activate_window: bool,
 ) -> Result<()> {
     let client = tmux::TmuxClient::from_env()?;
-    move_cursor_with_client(&client, pane, line_no, true_col, target_client)
+    move_cursor_with_client(
+        &client,
+        pane,
+        line_no,
+        true_col,
+        target_client,
+        activate_window,
+    )
 }
 
 pub(super) fn move_cursor_with_client(
@@ -38,8 +53,9 @@ pub(super) fn move_cursor_with_client(
     line_no: usize,
     true_col: usize,
     target_client: Option<&str>,
+    activate_window: bool,
 ) -> Result<()> {
-    let commands = navigation_commands(pane, line_no, true_col, target_client);
+    let commands = navigation_commands(pane, line_no, true_col, target_client, activate_window);
     client
         .run_commands(&commands)
         .context("failed to move motion cursor")
@@ -50,19 +66,9 @@ fn navigation_commands(
     line_no: usize,
     true_col: usize,
     target_client: Option<&str>,
+    activate_window: bool,
 ) -> Vec<Vec<OsString>> {
     let mut commands = Vec::new();
-    if let Some(target_client) = target_client {
-        commands.push(command([
-            "switch-client",
-            "-c",
-            target_client,
-            "-t",
-            pane.window_id.as_str(),
-        ]));
-    } else {
-        commands.push(command(["select-window", "-t", pane.window_id.as_str()]));
-    }
     commands.push(command(["select-pane", "-t", pane.pane_id.as_str()]));
     if !pane.copy_mode {
         commands.push(command(["copy-mode", "-t", pane.pane_id.as_str()]));
@@ -127,6 +133,22 @@ fn navigation_commands(
     }
     if true_col > 0 {
         commands.push(repeat_command(pane, true_col, "cursor-right"));
+    }
+    // Hint windows return through their supervisor so switching back and
+    // unlinking the overlay can share one redraw of the positioned source.
+    if !activate_window {
+        return commands;
+    }
+    if let Some(target_client) = target_client {
+        commands.push(command([
+            "switch-client",
+            "-c",
+            target_client,
+            "-t",
+            pane.window_id.as_str(),
+        ]));
+    } else {
+        commands.push(command(["select-window", "-t", pane.window_id.as_str()]));
     }
     commands
 }
