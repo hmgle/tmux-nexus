@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-15
+
 ### Fixed
 - Motion returns from hint windows with a single redraw of the positioned
   cursor, without waiting for the next tmux liveness poll or redrawing the
@@ -19,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   empty, successful response to the floating-pane capability check.
 - Motion hints no longer shift zoomed pane content when opening or closing on
   tmux versions with floating panes. These versions use a temporary hint window
-  that leaves the original pane dimensions intact and is removed on exit.
+  that leaves the original pane dimensions intact and is removed on exit. This
+  also avoids permanent loss of lower screen rows on affected tmux master builds.
 - Motion hints now refresh their pane content after the popup opens, avoiding
   stale jump coordinates when tmux temporarily unzooms a pane and the shell
   redraws cleared-screen output such as `git remote -v`.
@@ -31,6 +34,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Motion jumps now skip tab-indented rows as anchors, keeping the exact target
   row and column when the first visible content row is a tab-indented wrapped
   continuation.
+
+### Changed
+- Motion startup batches source and client metadata queries, and hint-window
+  supervision checks local readiness and completion between tmux liveness polls.
+
+### Tests
+- CI exercises the popup backend on system tmux and the window backend on pinned
+  tmux 3.7c, including first-frame readiness, abnormal exits, and focus handling.
+- Terminal regressions check one- and two-character motion, selection and
+  cancellation in tiled and zoomed panes, and preservation of an idle screen's
+  bottom rows and full history while the cursor remains at the top.
+
+### Notes
+- Added [tmux compatibility context][tmux-compatibility-0.8.2] for the popup
+  resize workaround and related [tmux PR #5668](https://github.com/tmux/tmux/pull/5668).
+  The upstream PR remains open as of this release; its branch has not been
+  validated as a fix, so the capability-based window backend remains in place.
+
+[tmux-compatibility-0.8.2]: https://github.com/hmgle/tmux-nexus/blob/v0.8.2/docs/tmux-compatibility.md
 
 ## [0.8.1] - 2026-08-31
 
