@@ -183,6 +183,50 @@ def check_motion():
                         assert tmux("list-windows", "-F", "#{window_id}") == window, "overlay window leaked"
                         assert tmux("show-option", "-gqv", "@tnx_test_layout_changed") == "0", "closing hints changed the source layout"
                         print(f"motion ({backend}): zoom={zoom}, query={query.decode()}, {choice}: passed")
+
+            # A popup-induced shrink can discard lower primary-screen rows
+            # when the cursor is at the top, even if size and zoom recover.
+            # Related upstream work: https://github.com/tmux/tmux/pull/5668
+            # The source is still zoomed after the cases above. Keep it idle
+            # so a shell redraw cannot conceal damage from opening or closing.
+            for choice in ("cancel", "select"):
+                tmux(
+                    "respawn-pane", "-k", "-t", pane,
+                    "printf '\\033[H\\033[2JTOP\\033[42;1HBOTTOM\\033[H'; exec sleep 60",
+                )
+                wait_until(lambda: "BOTTOM" in grid(), "idle bottom-row fixture")
+                before_grid, before_metadata = grid(), metadata()
+                before_history = tmux("capture-pane", "-p", "-S", "-", "-t", pane)
+                assert before_metadata.split(",")[1:3] == ["0", "0"], "fixture cursor isn't at top left"
+                assert before_metadata.split(",")[-1] == "1", "fixture isn't zoomed"
+                terminal_output.clear()
+                tmux("set-option", "-gq", "@tnx_test_layout_changed", "0")
+                os.write(master, b"\x02s")
+                wait_until(lambda: b"motion:" in terminal_output, "idle fixture motion prompt")
+                terminal_output.clear()
+                os.write(master, b"O")
+                wait_until(
+                    lambda: re.search(rb"\x1b\[(?:[0-9]+;)*31m", terminal_output),
+                    "idle fixture hint labels",
+                )
+                assert grid() == before_grid, "opening hints discarded idle source text"
+                assert metadata() == before_metadata, "opening hints changed idle source metadata"
+                assert tmux("capture-pane", "-p", "-S", "-", "-t", pane) == before_history
+                os.write(master, b"\x1b" if choice == "cancel" else b"a")
+                wait_until(
+                    lambda: not list(tmp.glob("tnx_motion.*.json")),
+                    "idle fixture motion cleanup",
+                )
+                if choice == "select":
+                    assert tmux("display-message", "-p", "-t", pane, "#{copy_cursor_x},#{copy_cursor_y}") == "1,0"
+                    tmux("send-keys", "-t", pane, "-X", "cancel")
+                assert grid() == before_grid, "closing hints discarded idle source text"
+                assert metadata() == before_metadata, "closing hints changed idle source metadata"
+                assert tmux("capture-pane", "-p", "-S", "-", "-t", pane) == before_history
+                assert tmux("display-message", "-p", "#{window_id}") == window
+                assert tmux("list-windows", "-F", "#{window_id}") == window, "idle fixture overlay leaked"
+                assert tmux("show-option", "-gqv", "@tnx_test_layout_changed") == "0", "idle fixture layout changed"
+                print(f"motion ({backend}): idle zoomed bottom-row content, {choice}: passed")
         finally:
             subprocess.run(
                 ["tmux", "-S", socket, "kill-server"], env=env,
