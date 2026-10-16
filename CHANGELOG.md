@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The documented zsh OSC 7 hook retries interrupted and partial terminal writes,
+  isolates path encoding from shell options, and refreshes its functions on
+  reload. It skips redirected output and unregisters itself if `zsh/system`
+  is unavailable.
+
+### Documentation
+- Clarified that shell hooks require manual configuration and are not installed
+  or updated by the plugin or binary installer.
+
 ## [0.8.2] - 2026-10-15
 
 ### Fixed

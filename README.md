@@ -250,6 +250,12 @@ and leaving SSH. The value updates when a prompt is rendered and may otherwise
 be stale. In particular, if only the remote shell emits OSC 7, the remote path
 can remain visible after SSH exits until the local shell emits its next update.
 
+The plugin and binary installer do not modify shell startup files. Add the
+appropriate hook below to `~/.bashrc` or `~/.zshrc` yourself if your shell or
+terminal integration does not already emit OSC 7. After changing a hook, reload
+that shell's startup file or open a new shell; updating the plugin alone does
+not update copied hooks.
+
 For bash, the following hook preserves an existing `PROMPT_COMMAND` and URL
 encodes the path:
 
@@ -280,30 +286,50 @@ else
 fi
 ```
 
-For zsh, install the equivalent hook with `add-zsh-hook`:
+For zsh, add this hook to `~/.zshrc`. It uses `zsh/system`'s `syswrite` to retry
+interrupted and partial terminal writes, avoiding occasional
+`__tmux_nexus_osc7:printf:2: write error: interrupt` diagnostics from `printf`.
+If `zsh/system` is unavailable, directory reporting is skipped.
 
 ```zsh
 autoload -Uz add-zsh-hook
 __tmux_nexus_urlencode() {
+    emulate -L zsh
     local LC_ALL=C value="$1" out= char i encoded
     for ((i = 1; i <= ${#value}; i++)); do
         char=${value[i]}
         case "$char" in
             [a-zA-Z0-9.~_-]|/) out+=$char ;;
-            *) printf -v encoded '%%%02X' "'$char"; out+=$encoded ;;
+            *) builtin printf -v encoded '%%%02X' "'$char"; out+=$encoded ;;
         esac
     done
-    printf '%s' "$out"
+    REPLY=$out
 }
 
 __tmux_nexus_osc7() {
     local exit_status=$?
-    printf '\e]7;file://%s%s\e\\' "$HOST" \
-        "$(__tmux_nexus_urlencode "$PWD")"
+    emulate -L zsh
+    [[ -t 1 ]] || return "$exit_status"
+    local REPLY
+    __tmux_nexus_urlencode "$PWD"
+    # syswrite retries EINTR and partial writes without forking a subprocess.
+    syswrite -- $'\e]7;file://'"$HOST$REPLY"$'\e\\' || :
     return "$exit_status"
 }
-add-zsh-hook precmd __tmux_nexus_osc7
+
+# Re-sourcing refreshes the functions; add-zsh-hook avoids duplicate entries.
+if zmodload -F zsh/system b:syswrite 2>/dev/null; then
+    add-zsh-hook precmd __tmux_nexus_osc7
+else
+    add-zsh-hook -d precmd __tmux_nexus_osc7
+fi
 ```
+
+This hook preserves the previous command's exit status, encodes paths byte by
+byte regardless of the caller's shell options, and writes only when standard
+output is a terminal. When replacing an older snippet, remove any surrounding
+`if (( ! $+functions[__tmux_nexus_osc7] )); then ... fi` guard so reloading
+`~/.zshrc` replaces the existing functions.
 
 Fish and several terminal integrations emit OSC 7 on `fish_prompt` already;
 enable that integration on both sides of an SSH connection if it is disabled.
