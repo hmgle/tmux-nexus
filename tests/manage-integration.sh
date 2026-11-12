@@ -2,6 +2,7 @@
 
 set -euo pipefail
 unset TMUX TMUX_PANE
+unset TNX_MANAGER_PREVIEW_WIDTH
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${TNX_BIN:-$ROOT/target/debug/tnx}"
@@ -19,6 +20,9 @@ mkdir -p "$TMP/bin"
 cat > "$TMP/bin/fzf" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ -n "${TNX_TEST_FZF_ARGS:-}" ]; then
+    printf '%s\n' "$@" > "$TNX_TEST_FZF_ARGS"
+fi
 input="$(cat)"
 if [ -n "${TNX_TEST_FZF_EXIT:-}" ]; then
     exit "$TNX_TEST_FZF_EXIT"
@@ -68,8 +72,10 @@ run_manage() {
     PATH="$TMP/bin:$PATH" \
         TNX_TMUX_ARGS="-L $SOCKET" \
         TNX_TEST_COPYQ_LOG="$TMP/copyq.log" \
+        TNX_TEST_FZF_ARGS="$TMP/fzf-args" \
         TNX_TEST_FZF_EXIT="${TNX_TEST_FZF_EXIT:-}" \
         TNX_MANAGER_FZF_OPTIONS="" \
+        TNX_MANAGER_PREVIEW=1 TNX_MANAGER_PREVIEW_FOLLOW=1 \
         TNX_MANAGER_CONFIRM=0 \
         "$BIN" manage "$@"
 }
@@ -77,6 +83,19 @@ run_manage() {
 tmux -L "$SOCKET" select-pane -t "$pane_one"
 run_manage pane switch
 [ "$(tmux -L "$SOCKET" display-message -p '#{pane_id}')" = "$pane_two" ]
+grep -Fxq 'right:50%:wrap:follow' "$TMP/fzf-args"
+
+tmux -L "$SOCKET" set-option -g @tmux_nexus_manager_preview_width '40%'
+TNX_TEST_FZF_EXIT=130 run_manage pane switch
+grep -Fxq 'right:40%:wrap:follow' "$TMP/fzf-args"
+TNX_MANAGER_PREVIEW_WIDTH=60 TNX_TEST_FZF_EXIT=130 run_manage pane switch
+grep -Fxq 'right:60%:wrap:follow' "$TMP/fzf-args"
+if TNX_MANAGER_PREVIEW_WIDTH=100 run_manage pane switch 2>"$TMP/width-error"; then
+    echo "manager integration: accepted an invalid preview width" >&2
+    exit 1
+fi
+grep -Fq 'TNX_MANAGER_PREVIEW_WIDTH' "$TMP/width-error"
+tmux -L "$SOCKET" set-option -gu @tmux_nexus_manager_preview_width
 
 pane_remote="$(tmux -L "$SOCKET" split-window -d -t "$pane_one" -P -F '#{pane_id}' \
     "env -i /bin/sh -c 'printf \"\\033]7;file://remote.example/path%%20B\\033\\\\\"; sleep 60'")"

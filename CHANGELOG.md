@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `@tmux_nexus_manager_preview_width` / `TNX_MANAGER_PREVIEW_WIDTH` controls the
+  right preview's share of the popup width (1–99%, default 50%). The list uses
+  the remaining width; updates apply on the next invocation.
+
 ### Changed
 - Manager pickers split the popup width equally between the list and preview,
   leaving more room for pane paths and commands.

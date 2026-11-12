@@ -101,6 +101,12 @@ with tempfile.TemporaryDirectory(prefix="tnx-manager-ui-") as directory:
         tmux(
             "set-option",
             "-g",
+            "@tmux_nexus_manager_preview_width",
+            os.environ.get("TNX_TEST_PREVIEW_WIDTH", "50%"),
+        )
+        tmux(
+            "set-option",
+            "-g",
             "@tmux_nexus_manager_pane_format",
             "#{b:pane_current_path} #{=/-26/...:#{d:pane_current_path}} [#{pane_current_command}]",
         )

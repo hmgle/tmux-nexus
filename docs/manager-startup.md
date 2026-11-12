@@ -37,6 +37,12 @@ Before: [ list 40% ][            preview 60%            ]
 After:  [       list 50%       ][      preview 50%      ]
 ```
 
+Set `@tmux_nexus_manager_preview_width` to change the right preview's percentage
+on the next invocation, without rebuilding. For example, `40%` gives the list
+60% and the preview 40%. `TNX_MANAGER_PREVIEW_WIDTH` overrides the tmux option.
+Both accept integers from 1 to 99 with an optional `%` suffix; the default is
+`50%`.
+
 ## Terminal verification and measurements
 
 Run the attached-client regression with an isolated tmux server:

@@ -214,6 +214,7 @@ Manager settings use `@tmux_nexus_manager_*` tmux options or
 | `order` | `history|copy-mode|session|window|pane|command|keybinding|clipboard|process` | category order and visibility |
 | `fzf_options` | `--tmux=center,62%,38%` | native fzf popup and picker options |
 | `preview`, `preview_follow` | `1`, `1` | preview visibility and follow mode |
+| `preview_width` | `50%` | right preview width, 1–99%; list uses the remaining width |
 | `confirm` | `1` | confirm destructive actions |
 | `switch_current` | `0` | include the current object in switch lists |
 | `session_format`, `window_format`, `pane_format` | tmux-aware defaults | custom list formats |
@@ -378,9 +379,17 @@ The manager calls fzf's native `--tmux` popup directly. Existing `-p`, `-w`,
 and `-h` sizes are translated in process; split layouts and explicit `-x`/`-y`
 coordinates should use native `--tmux=POSITION,WIDTH,HEIGHT` settings instead.
 Pane previews call `tmux capture-pane` directly without a temporary row snapshot
-or an intermediate `tnx` process. Manager pickers reserve approximately 50% of
-the popup width for the list and 50% for the preview, giving paths and commands
-more room. Preview content wraps within the right-hand region.
+or an intermediate `tnx` process. Manager pickers default to equal widths for
+the list and preview. Preview content wraps within the right-hand region.
+To give the list 60% and the preview 40%, set:
+
+```tmux
+set -g @tmux_nexus_manager_preview_width "40%"
+```
+
+The equivalent environment variable is `TNX_MANAGER_PREVIEW_WIDTH=40%`, which
+overrides the tmux option. Values from 1 to 99 are accepted, with or without `%`.
+Changes take effect the next time a manager picker opens.
 
 CLI flags override configuration for that run.
 

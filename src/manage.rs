@@ -60,6 +60,7 @@ struct ManagerConfig {
     fzf_options: String,
     preview: bool,
     preview_follow: bool,
+    preview_width: u8,
     confirm: bool,
     switch_current: bool,
     session_format: Option<String>,
@@ -264,6 +265,11 @@ impl ManagerConfig {
                 "TMUX_FZF_PREVIEW_FOLLOW",
                 true,
             )?,
+            preview_width: get("preview_width", "TNX_MANAGER_PREVIEW_WIDTH", "")
+                .map(|value| parse_preview_width(&value))
+                .transpose()
+                .context("invalid manager setting TNX_MANAGER_PREVIEW_WIDTH/manager_preview_width")?
+                .unwrap_or(50),
             confirm: boolean("confirm", "TNX_MANAGER_CONFIRM", "", true)?,
             switch_current: boolean(
                 "switch_current",
@@ -987,7 +993,7 @@ fn choose(
         let hidden = if config.preview { "" } else { ":hidden" };
         command.args([
             "--preview-window",
-            &format!("right:50%:wrap{follow}{hidden}"),
+            &format!("right:{}%:wrap{follow}{hidden}", config.preview_width),
             "--preview",
             preview.as_str(),
         ]);
@@ -1230,6 +1236,14 @@ fn parse_bool(value: &str) -> Result<bool> {
     }
 }
 
+fn parse_preview_width(value: &str) -> Result<u8> {
+    let value = value.trim();
+    match value.strip_suffix('%').unwrap_or(value).parse::<u8>() {
+        Ok(width @ 1..=99) => Ok(width),
+        _ => anyhow::bail!("expected a preview percentage from 1 to 99, got '{value}'"),
+    }
+}
+
 fn sanitize(value: &str) -> String {
     value
         .chars()
@@ -1263,10 +1277,26 @@ fn ensure_program(program: &str, message: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        native_popup_options, parse_bool, parse_menu, parse_pane_entry, parse_session_entry,
-        parse_window_entry, percent_decode, picker_exit, render_pane_context, truncate_display,
-        without_multi, PaneRemoteMode, PickerExit,
+        native_popup_options, parse_bool, parse_menu, parse_pane_entry, parse_preview_width,
+        parse_session_entry, parse_window_entry, percent_decode, picker_exit, render_pane_context,
+        truncate_display, without_multi, PaneRemoteMode, PickerExit,
     };
+
+    #[test]
+    fn validates_preview_percentages() {
+        for (value, width) in [
+            ("50", 50),
+            ("40%", 40),
+            (" 65% ", 65),
+            ("1%", 1),
+            ("99", 99),
+        ] {
+            assert_eq!(parse_preview_width(value).unwrap(), width);
+        }
+        for value in ["", "0", "100%", "-1", "101", "40%%", "half", "50.5%"] {
+            assert!(parse_preview_width(value).is_err(), "accepted {value:?}");
+        }
+    }
 
     #[test]
     fn parses_remote_context_modes() {
