@@ -34,6 +34,8 @@ Pane, window, session, and buffer previews carry a hidden target in each fzf
 row. They invoke `tmux capture-pane` or `tmux show-buffer` directly against that
 target using the configured socket. They do not write a JSON snapshot or start
 another tnx process. CopyQ previews retain their snapshot implementation.
+Buffer targets use fzf's `{s2}` placeholder to preserve leading and trailing
+spaces while still quoting the name for the preview shell.
 
 The list now occupies approximately 50% of the popup width, with a wrapping
 preview on the right taking 50%. Previously, the list had 40% and the preview
@@ -69,8 +71,13 @@ The test sends the actual prefix binding through a PTY and measures until the
 preview content, cancellation, and switching to the previewed pane. A failing
 `fzf-tmux` stub verifies that the manager does not use the wrapper. The socket
 path contains both spaces and a quote to exercise preview command quoting.
-Window, session, and buffer previews are also checked, including a buffer name
-containing quotes and shell syntax to verify that fzf passes it as data.
+Window, session, and buffer previews are also checked. Buffer names include
+leading/trailing spaces, quotes, and shell syntax. Preview markers are placed
+beyond the list summary, and a separate buffer with the trimmed name contains
+different content, so the check fails if the preview trims or misquotes a name.
+Fault injection with all `show-buffer` calls blocked was verified to fail the
+strengthened regression on fzf 0.60.3; the earlier summary-based check passed
+incorrectly under the same fault.
 Normal mode leaves `TNX_BIN` unset and includes backend version and source
 freshness checks. Override mode explicitly selects the binary and skips those
 checks. `TNX_TEST_LAUNCHER` can select a launcher fixture for comparisons.

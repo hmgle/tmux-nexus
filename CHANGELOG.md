@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides before reading checkout metadata, reducing subprocess startup.
 
 ### Fixed
+- Buffer previews preserve leading and trailing spaces in names, so the
+  preview uses the same buffer as paste even when a trimmed name also exists.
+  The terminal regression checks content beyond the list summary.
 - Popup benchmarks compute P95 with the nearest-rank method and retain raw
   samples. The previously reported P95 values are relabeled as maxima.
 - A bare manager `-p` popup option preserves sizes configured before it,

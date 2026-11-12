@@ -954,7 +954,7 @@ fn choose(
             }
         )),
         Some("buffer") => Some(format!(
-            "{} {{2}}",
+            "{} {{s2}}",
             context.tmux.shell_command(["show-buffer", "-b"])
         )),
         _ => None,
@@ -984,7 +984,7 @@ fn choose(
     command.arg(if multi { "-m" } else { "+m" });
     if let Some(kind) = preview_kind {
         let preview = if let Some(preview) = direct_preview {
-            // fzf quotes the hidden target in {2}, including buffer names.
+            // fzf quotes hidden targets; {s2} also preserves buffer-name spaces.
             preview
         } else {
             let exe = env::current_exe()?;

@@ -193,12 +193,23 @@ with tempfile.TemporaryDirectory(prefix="tnx-manager-ui-") as directory:
         )
         check_preview("session", "switch", b"PREVIEW_MANAGER_SESSION")
         injected = tmp / "injected"
-        buffer_name = f"buffer 'quote' $(touch {injected})"
-        tmux("set-buffer", "-b", buffer_name, "PREVIEW_MANAGER_BUFFER")
-        check_preview("clipboard", "buffer", b"PREVIEW_MANAGER_BUFFER")
-        assert not injected.exists(), (
-            "preview interpreted the buffer name as shell code"
-        )
+        # Both buffers have identical list summaries. Only show-buffer can
+        # expose the marker after the long prefix, and trimming selects a decoy.
+        prefix = "buffer summary " + "x" * 512 + "\n"
+        marker = "PREVIEW_MANAGER_BUFFER"
+        for buffer_name in [" buffer ", f" buffer 'quote' $(touch {injected}) "]:
+            decoy_name = buffer_name.strip()
+            tmux("set-buffer", "-b", decoy_name, prefix + "WRONG_BUFFER_PREVIEW")
+            tmux("set-buffer", "-b", buffer_name, prefix + marker)
+            assert marker not in tmux("list-buffers", "-F", "#{buffer_sample}"), (
+                "preview marker must not appear in the list summary"
+            )
+            check_preview("clipboard", "buffer", marker.encode())
+            assert not injected.exists(), (
+                "preview interpreted the buffer name as shell code"
+            )
+            tmux("delete-buffer", "-b", buffer_name)
+            tmux("delete-buffer", "-b", decoy_name)
 
         # Nearest-rank P95: for 20 samples, use the 19th sorted value.
         p95 = sorted(times)[math.ceil(len(times) * 0.95) - 1]
