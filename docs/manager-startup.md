@@ -28,6 +28,15 @@ For pane previews, each fzf row carries a hidden pane ID. The preview invokes
 It does not write a JSON snapshot or start another tnx process. Other manager
 preview categories retain their snapshot implementation.
 
+The list now occupies approximately 50% of the popup width, with a wrapping
+preview on the right taking 50%. Previously, the list had 40% and the preview
+60%. The overall popup dimensions stay controlled by `--tmux`:
+
+```text
+Before: [ list 40% ][            preview 60%            ]
+After:  [       list 50%       ][      preview 50%      ]
+```
+
 ## Terminal verification and measurements
 
 Run the attached-client regression with an isolated tmux server:
@@ -45,7 +54,10 @@ preview content, cancellation, and switching to the previewed pane. A failing
 path contains both spaces and a quote to exercise preview command quoting.
 
 Local Linux measurements on 2026-11-12, with tmux next-3.9, fzf 0.60 (devel),
-143 panes, a 160x44 terminal, and the same 86%x58% popup and custom pane format:
+143 panes, a 160x44 terminal, and the same 86%x58% popup and custom pane format.
+
+These startup measurements preceded the layout adjustment and used a 60%-wide
+preview on both versions.
 
 | Keypress to prompt | Before (0748ddb) | After |
 | --- | ---: | ---: |

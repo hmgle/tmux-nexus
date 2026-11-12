@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Manager pickers split the popup width equally between the list and preview,
+  leaving more room for pane paths and commands.
 - Manager pickers use native fzf popups (tmux 3.3+ and fzf 0.53+), removing
   the fzf-tmux shell wrapper and per-launch version probes. Existing `-p`/`-w`/
   `-h` popup sizes are translated to `--tmux` options.

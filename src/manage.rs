@@ -987,7 +987,7 @@ fn choose(
         let hidden = if config.preview { "" } else { ":hidden" };
         command.args([
             "--preview-window",
-            &format!("right:60%:wrap{follow}{hidden}"),
+            &format!("right:50%:wrap{follow}{hidden}"),
             "--preview",
             preview.as_str(),
         ]);
