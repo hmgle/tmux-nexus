@@ -19,6 +19,10 @@ query. Pane enumeration and the current-pane identifiers share a second tmux
 client invocation. The list still uses live pane information and the configured
 display format; it does not cache pane names, paths, or commands.
 
+The launcher parses manifest and binary versions with Bash builtins. An explicit
+`TNX_BIN` override is executed before inspecting the checkout. Normal launches
+still check the binary version and source freshness before selecting a backend.
+
 For pane previews, each fzf row carries a hidden pane ID. The preview invokes
 `tmux capture-pane` directly against that ID using the configured tmux socket.
 It does not write a JSON snapshot or start another tnx process. Other manager

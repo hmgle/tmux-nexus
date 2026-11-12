@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pane previews run `tmux capture-pane` directly, avoiding temporary JSON files
   and intermediate tnx processes. Startup reuses the configuration snapshot and
   batches pane enumeration with the current-pane query.
+- The launcher parses versions with Bash builtins and executes `TNX_BIN`
+  overrides before reading checkout metadata, reducing subprocess startup.
 
 ### Fixed
 - The documented zsh OSC 7 hook retries interrupted and partial terminal writes,

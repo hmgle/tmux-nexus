@@ -13,29 +13,9 @@
 
 set -o pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 is_exec() { [ -n "$1" ] && [ -x "$1" ]; }
 
-expected_version="$(awk -F'"' '/^version[[:space:]]*=/{print $2; exit}' "$DIR/Cargo.toml")"
-
-binary_version() {
-    "$1" --version 2>/dev/null | awk '{print $NF; exit}'
-}
-
-source_is_newer() {
-    find "$DIR/src" "$DIR/Cargo.toml" "$DIR/Cargo.lock" -type f -newer "$1" -print -quit 2>/dev/null |
-        grep -q .
-}
-
-is_current_exec() {
-    is_exec "$1" || return 1
-    [ -n "$expected_version" ] || return 1
-    [ "$(binary_version "$1")" = "$expected_version" ] || return 1
-    ! source_is_newer "$1"
-}
-
-# 1. Explicit override.
+# Explicit overrides need no checkout metadata or path resolution.
 if [ -n "${TNX_BIN:-}" ]; then
     if ! is_exec "$TNX_BIN"; then
         echo "tmux-nexus: TNX_BIN is not executable: $TNX_BIN" >&2
@@ -43,6 +23,30 @@ if [ -n "${TNX_BIN:-}" ]; then
     fi
     exec "$TNX_BIN" "$@"
 fi
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+expected_version=""
+while IFS= read -r manifest_line; do
+    if [[ "$manifest_line" =~ ^version[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+        expected_version="${BASH_REMATCH[1]}"
+        break
+    fi
+done < "$DIR/Cargo.toml"
+
+source_is_newer() {
+    find "$DIR/src" "$DIR/Cargo.toml" "$DIR/Cargo.lock" -type f -newer "$1" -print -quit 2>/dev/null |
+        grep -q .
+}
+
+is_current_exec() {
+    local version_output
+    is_exec "$1" || return 1
+    [ -n "$expected_version" ] || return 1
+    version_output="$("$1" --version 2>/dev/null)" || return 1
+    [ "${version_output##* }" = "$expected_version" ] || return 1
+    ! source_is_newer "$1"
+}
 
 # 2 & 3. Already-present binaries, freshest local build first, then a download.
 for candidate in \
