@@ -56,7 +56,11 @@ Run the attached-client regression with an isolated tmux server:
 
 ```sh
 cargo build --release --locked
-TNX_BIN="$PWD/target/release/tnx" TNX_TEST_SAMPLES=20 TNX_TEST_PANES=143 \
+TNX_TEST_LAUNCH_MODE=normal TNX_TEST_SAMPLES=20 TNX_TEST_PANES=143 \
+  TNX_TEST_RESULTS=/tmp/tnx-normal.json \
+  uv run --no-project python tests/manage-popup-integration.py
+TNX_BIN="$PWD/target/release/tnx" TNX_TEST_LAUNCH_MODE=override \
+  TNX_TEST_SAMPLES=20 TNX_TEST_PANES=143 TNX_TEST_RESULTS=/tmp/tnx-override.json \
   uv run --no-project python tests/manage-popup-integration.py
 ```
 
@@ -65,6 +69,11 @@ The test sends the actual prefix binding through a PTY and measures until the
 preview content, cancellation, and switching to the previewed pane. A failing
 `fzf-tmux` stub verifies that the manager does not use the wrapper. The socket
 path contains both spaces and a quote to exercise preview command quoting.
+Normal mode leaves `TNX_BIN` unset and includes backend version and source
+freshness checks. Override mode explicitly selects the binary and skips those
+checks. `TNX_TEST_LAUNCHER` can select a launcher fixture for comparisons.
+JSON output retains every sample. P95 uses the nearest-rank definition:
+`sorted(samples)[ceil(0.95 * n) - 1]`, the 19th value for 20 samples.
 
 Local Linux measurements on 2026-11-12, with tmux next-3.9, fzf 0.60 (devel),
 143 panes, a 160x44 terminal, and the same 86%x58% popup and custom pane format.
@@ -76,9 +85,40 @@ preview on both versions.
 | --- | ---: | ---: |
 | First invocation in the test server | 258.2 ms | 112.3 ms |
 | Median of 20 invocations | 140.6 ms | 90.8 ms |
-| 95th percentile of 20 invocations | 258.2 ms | 113.3 ms |
+| Maximum of 20 invocations | 258.2 ms | 113.3 ms |
 
 The median decreased by about 35%. These are sequential local runs with warm
 filesystem caches, not a reproduction of an intermittent stall after a long
 idle period. They include tmux scheduling and terminal rendering; system load
 and terminal settings can change the results.
+
+The original last row was incorrectly labeled P95. Its values are maxima, and
+the original raw samples were not saved, so their P95 cannot be recovered.
+Those runs used `TNX_BIN`; they establish the backend improvement but do not
+isolate the normal launcher's metadata-check cost.
+
+## Launcher-only comparison
+
+The [saved samples](benchmarks/manager-launcher-2026-11-12.json) compare the
+launcher before and after dc9fd7c using the identical current release backend.
+Each fixture contains the same manifest, lockfile, source tree, and binary,
+with source timestamps preserved so a normal launch does not rebuild.
+
+Interleaved `--version` invocations, 50 samples per case:
+
+| Launcher mode | Before median | After median |
+| --- | ---: | ---: |
+| Normal, including metadata checks | 10.21 ms | 9.01 ms |
+| Explicit `TNX_BIN` | 6.39 ms | 3.31 ms |
+
+Full popup runs, 143 panes, 20 samples per case, 50%-wide preview:
+
+| Launcher mode | Before median / P95 | After median / P95 |
+| --- | ---: | ---: |
+| Normal | 107.9 / 134.0 ms | 128.7 / 139.4 ms |
+| Explicit `TNX_BIN` | 102.6 / 128.8 ms | 105.1 / 123.3 ms |
+
+These sequential popup runs do not demonstrate a launcher speedup: tmux and
+rendering variability exceed the small launcher-only saving. The isolated
+`--version` measurements show reduced startup cost, while the earlier 35%
+popup improvement primarily concerns the backend and native fzf path.

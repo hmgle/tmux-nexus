@@ -1,6 +1,8 @@
 """Exercise and time pane switching through an isolated attached tmux client."""
 
 import fcntl
+import json
+import math
 import os
 import pty
 import select
@@ -15,8 +17,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = Path(os.environ.get("TNX_BIN", ROOT / "target/debug/tnx")).resolve()
+LAUNCHER = Path(os.environ.get("TNX_TEST_LAUNCHER", ROOT / "tnx")).resolve()
+LAUNCH_MODE = os.environ.get("TNX_TEST_LAUNCH_MODE", "override")
+if LAUNCH_MODE not in ("normal", "override"):
+    raise ValueError("TNX_TEST_LAUNCH_MODE must be normal or override")
 SAMPLES = int(os.environ.get("TNX_TEST_SAMPLES", "3"))
 PANES = int(os.environ.get("TNX_TEST_PANES", "2"))
+if SAMPLES < 1 or PANES < 2:
+    raise ValueError("use at least one sample and two panes")
 with tempfile.TemporaryDirectory(prefix="tnx-manager-ui-") as directory:
     tmp = Path(directory)
     socket = str(tmp / "tmux socket's.sock")
@@ -112,24 +120,23 @@ with tempfile.TemporaryDirectory(prefix="tnx-manager-ui-") as directory:
         )
         done = tmp / "done"
         errors = tmp / "errors"
-        command = shlex.join(
-            [
-                "env",
-                "BASH_FUNC_tnx_test%%=() { :; }",
-                f"TNX_BIN={BIN}",
-                str(ROOT / "tnx"),
-                "manage",
-                "pane",
-                "switch",
-            ]
-        )
-        tmux(
-            "bind-key",
-            "f",
-            "run-shell",
-            "-b",
-            f"{command} 2>{shlex.quote(str(errors))}; touch {shlex.quote(str(done))}",
-        )
+        launch_env = ["env", "BASH_FUNC_tnx_test%%=() { :; }"]
+        if LAUNCH_MODE == "override":
+            launch_env.append(f"TNX_BIN={BIN}")
+
+        def bind_picker(category, action):
+            command = shlex.join(
+                launch_env + [str(LAUNCHER), "manage", category, action]
+            )
+            tmux(
+                "bind-key",
+                "f",
+                "run-shell",
+                "-b",
+                f"{command} 2>{shlex.quote(str(errors))}; touch {shlex.quote(str(done))}",
+            )
+
+        bind_picker("pane", "switch")
         attached = subprocess.Popen(
             ["tmux", "-S", socket, "attach-session", "-t", "manager"],
             stdin=slave,
@@ -163,10 +170,31 @@ with tempfile.TemporaryDirectory(prefix="tnx-manager-ui-") as directory:
         wait(done.exists, "switch completion")
         assert tmux("display-message", "-p", "#{pane_id}") == target
         assert not errors.read_text(), errors.read_text()
+
+        # Nearest-rank P95: for 20 samples, use the 19th sorted value.
+        p95 = sorted(times)[math.ceil(len(times) * 0.95) - 1]
+        result = {
+            "mode": LAUNCH_MODE,
+            "launcher": str(LAUNCHER),
+            "override_binary": str(BIN) if LAUNCH_MODE == "override" else None,
+            "panes": PANES,
+            "sample_count": SAMPLES,
+            "samples_ms": times,
+            "first_ms": times[0],
+            "median_ms": statistics.median(times),
+            "p95_nearest_rank_ms": p95,
+            "max_ms": max(times),
+            "tmux_version": tmux("-V"),
+            "fzf_version": subprocess.check_output(
+                ["fzf", "--version"], env=env, text=True
+            ).strip(),
+        }
+        if destination := os.environ.get("TNX_TEST_RESULTS"):
+            Path(destination).write_text(json.dumps(result, indent=2) + "\n")
         print(
-            f"{BIN}: {PANES} panes, {SAMPLES} samples; "
+            f"{LAUNCH_MODE}: {PANES} panes, {SAMPLES} samples; "
             f"first {times[0]:.1f} ms; median {statistics.median(times):.1f} ms; "
-            f"p95 {sorted(times)[min(len(times) - 1, int(len(times) * 0.95))]:.1f} ms"
+            f"p95 {p95:.1f} ms; max {max(times):.1f} ms"
         )
     finally:
         # This absolute private socket is the only server we clean up.
