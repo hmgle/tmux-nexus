@@ -18,9 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Manager pickers use native fzf popups (tmux 3.3+ and fzf 0.60.3+), removing
   the fzf-tmux shell wrapper and per-launch version probes. Existing `-p`/`-w`/
   `-h` popup sizes are translated to `--tmux` options.
-- Pane previews run `tmux capture-pane` directly, avoiding temporary JSON files
-  and intermediate tnx processes. Startup reuses the configuration snapshot and
-  batches pane enumeration with the current-pane query.
+- Pane, window, session, and buffer previews call tmux directly, avoiding
+  temporary JSON files and intermediate tnx processes. Startup reuses the
+  configuration snapshot and batches pane enumeration with the current-pane query.
 - The launcher parses versions with Bash builtins and executes `TNX_BIN`
   overrides before reading checkout metadata, reducing subprocess startup.
 

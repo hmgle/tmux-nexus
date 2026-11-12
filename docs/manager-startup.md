@@ -30,10 +30,10 @@ The launcher parses manifest and binary versions with Bash builtins. An explicit
 `TNX_BIN` override is executed before inspecting the checkout. Normal launches
 still check the binary version and source freshness before selecting a backend.
 
-For pane previews, each fzf row carries a hidden pane ID. The preview invokes
-`tmux capture-pane` directly against that ID using the configured tmux socket.
-It does not write a JSON snapshot or start another tnx process. Other manager
-preview categories retain their snapshot implementation.
+Pane, window, session, and buffer previews carry a hidden target in each fzf
+row. They invoke `tmux capture-pane` or `tmux show-buffer` directly against that
+target using the configured socket. They do not write a JSON snapshot or start
+another tnx process. CopyQ previews retain their snapshot implementation.
 
 The list now occupies approximately 50% of the popup width, with a wrapping
 preview on the right taking 50%. Previously, the list had 40% and the preview
@@ -69,6 +69,8 @@ The test sends the actual prefix binding through a PTY and measures until the
 preview content, cancellation, and switching to the previewed pane. A failing
 `fzf-tmux` stub verifies that the manager does not use the wrapper. The socket
 path contains both spaces and a quote to exercise preview command quoting.
+Window, session, and buffer previews are also checked, including a buffer name
+containing quotes and shell syntax to verify that fzf passes it as data.
 Normal mode leaves `TNX_BIN` unset and includes backend version and source
 freshness checks. Override mode explicitly selects the binary and skips those
 checks. `TNX_TEST_LAUNCHER` can select a launcher fixture for comparisons.

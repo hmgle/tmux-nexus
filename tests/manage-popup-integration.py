@@ -91,7 +91,7 @@ with tempfile.TemporaryDirectory(prefix="tnx-manager-ui-") as directory:
             "-P",
             "-F",
             "#{pane_id}",
-            "sleep 120",
+            "printf '\\033[40;1HPREVIEW_MANAGER_ORIGIN'; sleep 120",
         )
         target = tmux(
             "new-window",
@@ -170,6 +170,35 @@ with tempfile.TemporaryDirectory(prefix="tnx-manager-ui-") as directory:
         wait(done.exists, "switch completion")
         assert tmux("display-message", "-p", "#{pane_id}") == target
         assert not errors.read_text(), errors.read_text()
+
+        def check_preview(category, action, marker):
+            bind_picker(category, action)
+            done.unlink()
+            output.clear()
+            os.write(master, b"\x02f")
+            wait(lambda: marker in output, category + " preview")
+            os.write(master, b"\x1b")
+            wait(done.exists, category + " cancel")
+            assert not errors.read_text(), errors.read_text()
+            assert tmux("display-message", "-p", "#{pane_id}") == target
+            drain(0.05)
+
+        check_preview("window", "switch", b"PREVIEW_MANAGER_ORIGIN")
+        tmux(
+            "new-session",
+            "-d",
+            "-s",
+            "other-session",
+            "printf '\\033[40;1HPREVIEW_MANAGER_SESSION'; sleep 120",
+        )
+        check_preview("session", "switch", b"PREVIEW_MANAGER_SESSION")
+        injected = tmp / "injected"
+        buffer_name = f"buffer 'quote' $(touch {injected})"
+        tmux("set-buffer", "-b", buffer_name, "PREVIEW_MANAGER_BUFFER")
+        check_preview("clipboard", "buffer", b"PREVIEW_MANAGER_BUFFER")
+        assert not injected.exists(), (
+            "preview interpreted the buffer name as shell code"
+        )
 
         # Nearest-rank P95: for 20 samples, use the 19th sorted value.
         p95 = sorted(times)[math.ceil(len(times) * 0.95) - 1]

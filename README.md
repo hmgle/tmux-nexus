@@ -378,9 +378,9 @@ preferred for new configurations.
 The manager calls fzf's native `--tmux` popup directly. Existing `-p`, `-w`,
 and `-h` sizes are translated in process; split layouts and explicit `-x`/`-y`
 coordinates should use native `--tmux=POSITION,WIDTH,HEIGHT` settings instead.
-Pane previews call `tmux capture-pane` directly without a temporary row snapshot
-or an intermediate `tnx` process. Manager pickers default to equal widths for
-the list and preview. Preview content wraps within the right-hand region.
+Pane, window, session, and buffer previews call tmux directly without a temporary
+row snapshot or an intermediate `tnx` process. Manager pickers default to equal
+widths for the list and preview. Preview content wraps within the right-hand region.
 To give the list 60% and the preview 40%, set:
 
 ```tmux

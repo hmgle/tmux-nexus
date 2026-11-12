@@ -943,8 +943,24 @@ fn choose(
         return Ok(Vec::new());
     }
     let config = &context.config;
-    let direct_pane_preview = preview_kind == Some("pane");
-    let mut data = (preview_kind.is_some() && !direct_pane_preview)
+    let direct_preview = match preview_kind {
+        Some("pane" | "window" | "session") => Some(format!(
+            "{} {{2}}{}",
+            context.tmux.shell_command(["capture-pane", "-ep", "-t"]),
+            if preview_kind == Some("session") {
+                ":"
+            } else {
+                ""
+            }
+        )),
+        Some("buffer") => Some(format!(
+            "{} {{2}}",
+            context.tmux.shell_command(["show-buffer", "-b"])
+        )),
+        _ => None,
+    };
+    let has_direct_preview = direct_preview.is_some();
+    let mut data = (preview_kind.is_some() && !has_direct_preview)
         .then(NamedTempFile::new)
         .transpose()?;
     if let Some(data) = data.as_mut() {
@@ -956,7 +972,7 @@ fn choose(
         "--delimiter",
         "\t",
         "--with-nth",
-        if direct_pane_preview { "3.." } else { "2.." },
+        if has_direct_preview { "3.." } else { "2.." },
         "--layout=reverse",
         "--info=inline",
         "--tiebreak=index",
@@ -967,12 +983,9 @@ fn choose(
     ]);
     command.arg(if multi { "-m" } else { "+m" });
     if let Some(kind) = preview_kind {
-        let preview = if direct_pane_preview {
-            // {2} is quoted by fzf. Preserve the exact tmux socket arguments.
-            format!(
-                "{} {{2}}",
-                context.tmux.shell_command(["capture-pane", "-ep", "-t"])
-            )
+        let preview = if let Some(preview) = direct_preview {
+            // fzf quotes the hidden target in {2}, including buffer names.
+            preview
         } else {
             let exe = env::current_exe()?;
             let data = data
@@ -1002,8 +1015,14 @@ fn choose(
     let mut child = command.spawn().context("failed to start manager fzf")?;
     if let Some(stdin) = child.stdin.as_mut() {
         for (index, row) in rows.iter().enumerate() {
-            let result = if direct_pane_preview {
-                writeln!(stdin, "{}\t{}\t{}", index, row.id, sanitize(&row.display))
+            let result = if has_direct_preview {
+                writeln!(
+                    stdin,
+                    "{}\t{}\t{}",
+                    index,
+                    sanitize(&row.id),
+                    sanitize(&row.display)
+                )
             } else {
                 writeln!(stdin, "{}\t{}", index, sanitize(&row.display))
             };
