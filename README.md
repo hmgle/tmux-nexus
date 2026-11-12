@@ -469,11 +469,12 @@ env -u TMUX -u TMUX_PANE bash tests/shell-quoting.sh
 env -u TMUX -u TMUX_PANE bash tests/tmux-integration.sh
 uv run --no-project python tests/motion-integration.py
 env -u TMUX -u TMUX_PANE bash tests/manage-integration.sh
+uv run --no-project python tests/manage-popup-integration.py
 ```
 
 The tmux integration tests require `tmux`; picker workflows and CI also require
-`fzf`. The motion terminal test uses `uv` and Python's standard library. Every
-test server uses its own explicit tmux socket.
+`fzf` 0.60.3+ for native manager popups. Terminal tests use `uv` and Python's
+standard library. Every test server uses its own explicit tmux socket.
 
 On tmux with floating panes, also run
 `uv run --no-project python tests/motion-lifecycle.py` to exercise startup
