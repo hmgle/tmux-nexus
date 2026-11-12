@@ -13,7 +13,7 @@ a local build or installs a checksum-verified release binary when needed.
 
 ## Requirements
 
-- `tmux` 3.3+ and `fzf` 0.53+ for native manager popups.
+- `tmux` 3.3+ and `fzf` 0.60.3+ for native manager popups.
 - `curl` or `wget` to download the prebuilt backend (only on first run). No Rust
   toolchain is required to use the plugin; install one only to build from source.
 - Optional: `fzf-tmux` for history-search popup rendering, `rg` for user

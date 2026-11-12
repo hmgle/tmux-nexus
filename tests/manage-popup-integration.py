@@ -113,7 +113,15 @@ with tempfile.TemporaryDirectory(prefix="tnx-manager-ui-") as directory:
         done = tmp / "done"
         errors = tmp / "errors"
         command = shlex.join(
-            ["env", f"TNX_BIN={BIN}", str(ROOT / "tnx"), "manage", "pane", "switch"]
+            [
+                "env",
+                "BASH_FUNC_tnx_test%%=() { :; }",
+                f"TNX_BIN={BIN}",
+                str(ROOT / "tnx"),
+                "manage",
+                "pane",
+                "switch",
+            ]
         )
         tmux(
             "bind-key",

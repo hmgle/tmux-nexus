@@ -24,7 +24,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck tmux fzf
-      - name: Install fzf with native popup support
+      - name: Install the supported fzf baseline (0.60.3)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -8,11 +8,18 @@ prefix + f -> tmux run-shell -b -> tnx launcher -> Rust manager
            -> native tmux popup -> selected pane
 ```
 
-The manager uses native fzf popups (fzf 0.53+ and tmux 3.3+). It does not run
+The manager uses native fzf popups (fzf 0.60.3+ and tmux 3.3+). It does not run
 the `fzf-tmux` Bash wrapper or probe program versions on each invocation.
 Existing `-p -w 86% -h 58%` settings are translated to
 `--tmux=center,86%,58%` inside the manager. New configurations can use the native
 option directly.
+
+fzf 0.60.3 is the supported and CI-tested release baseline. Older native-popup
+implementations can fail with `bad variable name` when the environment contains
+exported Bash functions (`BASH_FUNC_*%%`). Upstream fixed function export in
+[4161403](https://github.com/junegunn/fzf/commit/4161403a1d6286f6ba7898b1f22f30d01d85b8dc).
+The terminal regression includes such a function. The manager retains its direct
+native path without runtime version probes or compatibility wrappers.
 
 Configuration, including an explicitly empty manager key, is read in one tmux
 query. Pane enumeration and the current-pane identifiers share a second tmux
