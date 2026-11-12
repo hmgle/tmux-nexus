@@ -24,6 +24,16 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck tmux fzf
+      - name: Install the supported fzf baseline (0.60.3)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/fzf"
+          cd "$RUNNER_TEMP/fzf"
+          gh release download v0.60.3 --repo junegunn/fzf --pattern fzf-0.60.3-linux_amd64.tar.gz
+          echo '2937a4f10b0f80e0c974d9459df3bc049b068a97212b0d253c36c9da5920b521  fzf-0.60.3-linux_amd64.tar.gz' | sha256sum --check
+          tar -xzf fzf-0.60.3-linux_amd64.tar.gz
+          echo "$RUNNER_TEMP/fzf" >> "$GITHUB_PATH"
       - name: Build tmux with floating panes
         if: matrix.tmux != 'system'
         env:
@@ -69,3 +79,5 @@ jobs:
         run: uv run --no-project python tests/motion-lifecycle.py
       - name: Run manager integration tests
         run: bash tests/manage-integration.sh
+      - name: Run manager popup integration tests
+        run: uv run --no-project python tests/manage-popup-integration.py

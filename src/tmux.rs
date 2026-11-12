@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-use crate::util::version_at_least;
+use crate::util::{shell_quote, version_at_least};
 
 pub fn have(program: &str) -> bool {
     which::which(program).is_ok()
@@ -37,6 +37,19 @@ impl TmuxClient {
         let mut command = Command::new("tmux");
         command.args(&self.args);
         command
+    }
+
+    /// Quote a command for fzf's preview shell, including the selected socket.
+    pub fn shell_command<const N: usize>(&self, args: [&str; N]) -> String {
+        std::iter::once("tmux".to_string())
+            .chain(
+                self.args
+                    .iter()
+                    .map(|arg| shell_quote(&arg.to_string_lossy())),
+            )
+            .chain(args.into_iter().map(shell_quote))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     pub fn output<I, S>(&self, args: I) -> Result<Output>
@@ -272,25 +285,12 @@ pub fn show_option(name: &str) -> Option<String> {
     try_stdout(["show-option", "-gqv", name]).filter(|value| !value.is_empty())
 }
 
-pub fn show_option_allow_empty(name: &str) -> Option<String> {
-    let output = TmuxClient::from_env()
-        .ok()?
-        .output(["show-option", "-g", name])
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let line = String::from_utf8_lossy(&output.stdout);
-    parse_show_option_line(line.trim()).map(|(_, value)| value)
-}
-
 pub fn show_options(prefix: &str) -> Result<Vec<(String, String)>> {
     let output = stdout(["show-options", "-gq"])?;
     Ok(output
         .lines()
         .filter_map(parse_show_option_line)
         .filter(|(name, _)| name.starts_with(prefix))
-        .filter(|(_, value)| !value.is_empty())
         .collect())
 }
 

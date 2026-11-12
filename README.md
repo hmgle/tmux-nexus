@@ -13,12 +13,12 @@ a local build or installs a checksum-verified release binary when needed.
 
 ## Requirements
 
-- `tmux` 3.2+ recommended.
-- `fzf` for the interactive picker.
+- `tmux` 3.3+ and `fzf` 0.60.3+ for native manager popups.
 - `curl` or `wget` to download the prebuilt backend (only on first run). No Rust
   toolchain is required to use the plugin; install one only to build from source.
-- Optional: `fzf-tmux` for popup rendering, `rg` for user workflows, and one
-  clipboard helper (`pbcopy`, `wl-copy`, `xclip`, `xsel`, or `clip.exe`).
+- Optional: `fzf-tmux` for history-search popup rendering, `rg` for user
+  workflows, and one clipboard helper (`pbcopy`, `wl-copy`, `xclip`, `xsel`,
+  or `clip.exe`).
 - Optional manager integrations: `copyq` for system clipboard history and
   `pstree` for process trees. Without CopyQ, the manager uses tmux buffers.
 
@@ -166,7 +166,7 @@ set -g @tmux_nexus_motion_key "s"
 set -g @tmux_nexus_motion2_key "S"
 set -g @tmux_nexus_motion_hints "asdghklqwertyuiopzxcvbnmfj;"
 set -g @tmux_nexus_manager_key "F"
-set -g @tmux_nexus_manager_fzf_options "-p -w 62% -h 38% -m"
+set -g @tmux_nexus_manager_fzf_options "--tmux=center,62%,38%"
 set -g @tmux_nexus_manager_confirm "1"
 ```
 
@@ -212,8 +212,9 @@ Manager settings use `@tmux_nexus_manager_*` tmux options or
 | --- | --- | --- |
 | `key` | `F` | tmux prefix binding; set it to an empty value to disable |
 | `order` | `history|copy-mode|session|window|pane|command|keybinding|clipboard|process` | category order and visibility |
-| `fzf_options` | `-p -w 62% -h 38%` | fzf-tmux popup/layout options |
+| `fzf_options` | `--tmux=center,62%,38%` | native fzf popup and picker options |
 | `preview`, `preview_follow` | `1`, `1` | preview visibility and follow mode |
+| `preview_width` | `50%` | right preview width, 1–99%; list uses the remaining width |
 | `confirm` | `1` | confirm destructive actions |
 | `switch_current` | `0` | include the current object in switch lists |
 | `session_format`, `window_format`, `pane_format` | tmux-aware defaults | custom list formats |
@@ -366,13 +367,29 @@ Remove `set -g @plugin 'sainnhe/tmux-fzf'`, keep the manager binding at its
 default `Prefix+F`, and translate persistent configuration as follows:
 
 ```tmux
-set -g @tmux_nexus_manager_fzf_options "-p -w 86% -h 58% -m"
+set -g @tmux_nexus_manager_fzf_options "--tmux=center,86%,58%"
 set -g @tmux_nexus_manager_pane_format \
   "#{b:pane_current_path} #{=/-26/...:#{d:pane_current_path}} [#{pane_current_command}]"
 ```
 
 Legacy environment variables remain supported, but the tmux options above are
 preferred for new configurations.
+
+The manager calls fzf's native `--tmux` popup directly. Existing `-p`, `-w`,
+and `-h` sizes are translated in process; split layouts and explicit `-x`/`-y`
+coordinates should use native `--tmux=POSITION,WIDTH,HEIGHT` settings instead.
+Pane, window, session, and buffer previews call tmux directly without a temporary
+row snapshot or an intermediate `tnx` process. Manager pickers default to equal
+widths for the list and preview. Preview content wraps within the right-hand region.
+To give the list 60% and the preview 40%, set:
+
+```tmux
+set -g @tmux_nexus_manager_preview_width "40%"
+```
+
+The equivalent environment variable is `TNX_MANAGER_PREVIEW_WIDTH=40%`, which
+overrides the tmux option. Values from 1 to 99 are accepted, with or without `%`.
+Changes take effect the next time a manager picker opens.
 
 CLI flags override configuration for that run.
 
@@ -452,11 +469,12 @@ env -u TMUX -u TMUX_PANE bash tests/shell-quoting.sh
 env -u TMUX -u TMUX_PANE bash tests/tmux-integration.sh
 uv run --no-project python tests/motion-integration.py
 env -u TMUX -u TMUX_PANE bash tests/manage-integration.sh
+uv run --no-project python tests/manage-popup-integration.py
 ```
 
 The tmux integration tests require `tmux`; picker workflows and CI also require
-`fzf`. The motion terminal test uses `uv` and Python's standard library. Every
-test server uses its own explicit tmux socket.
+`fzf` 0.60.3+ for native manager popups. Terminal tests use `uv` and Python's
+standard library. Every test server uses its own explicit tmux socket.
 
 On tmux with floating panes, also run
 `uv run --no-project python tests/motion-lifecycle.py` to exercise startup

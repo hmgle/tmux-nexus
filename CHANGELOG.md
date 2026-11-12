@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-12
+
+### Added
+- `@tmux_nexus_manager_preview_width` / `TNX_MANAGER_PREVIEW_WIDTH` controls the
+  right preview's share of the popup width (1–99%, default 50%). The list uses
+  the remaining width; updates apply on the next invocation.
+
+### Changed
+- Manager pickers split the popup width equally between the list and preview,
+  leaving more room for pane paths and commands.
+- Manager pickers use native fzf popups (tmux 3.3+ and fzf 0.60.3+), removing
+  the fzf-tmux shell wrapper and per-launch version probes. Existing `-p`/`-w`/
+  `-h` popup sizes are translated to `--tmux` options.
+- Pane, window, session, and buffer previews call tmux directly, avoiding
+  temporary JSON files and intermediate tnx processes. Startup reuses the
+  configuration snapshot and batches pane enumeration with the current-pane
+  query.
+- The launcher parses versions with Bash builtins and executes `TNX_BIN`
+  overrides before reading checkout metadata, reducing subprocess startup.
+
 ### Fixed
+- Native manager `--tmux` and `--no-tmux` options after the legacy `--`
+  separator are respected instead of being overridden by the default popup.
+- Buffer previews preserve leading and trailing spaces in names, so the
+  preview uses the same buffer as paste even when a trimmed name also exists.
+  The terminal regression checks content beyond the list summary.
+- Popup benchmarks compute P95 with the nearest-rank method and retain raw
+  samples. The previously reported P95 values are relabeled as maxima.
+- A bare manager `-p` popup option preserves sizes configured before it,
+  including partially specified dimensions.
 - The documented zsh OSC 7 hook retries interrupted and partial terminal writes,
   isolates path encoding from shell options, and refreshes its functions on
   reload. It skips redirected output and unregisters itself if `zsh/system`
@@ -16,6 +45,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 - Clarified that shell hooks require manual configuration and are not installed
   or updated by the plugin or binary installer.
+
+### Upgrade notes
+- Manager popups require tmux 3.3+ and fzf 0.60.3+. There is no fallback to
+  older fzf popup implementations or a per-launch version probe.
+- Existing `-p`/`-w`/`-h` popup sizes remain supported. Use native
+  `--tmux=POSITION,WIDTH,HEIGHT` options for placement; legacy split layouts
+  and explicit `-x`/`-y` coordinates are no longer supported by the manager.
+- List and preview widths now default to 50% each. Set
+  `@tmux_nexus_manager_preview_width` (or `TNX_MANAGER_PREVIEW_WIDTH`) to
+  adjust the right preview's percentage without rebuilding.
+
+### Validation
+- Added attached-terminal regressions for native popups, exported Bash
+  functions, workspace and buffer previews, exact buffer names, cancellation,
+  selection, and preview shell quoting.
+- The earlier local 143-pane comparison measured a median reduction from
+  140.6 ms to 90.8 ms. These warm-cache results do not establish a fix for
+  intermittent stalls after long idle periods. Raw launcher comparisons and
+  corrected percentile methodology are in the
+  [manager startup notes](https://github.com/hmgle/tmux-nexus/blob/v0.9.0/docs/manager-startup.md).
 
 ## [0.8.2] - 2026-10-15
 

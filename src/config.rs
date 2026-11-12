@@ -159,6 +159,7 @@ fn tmux_options() -> Result<&'static HashMap<String, String>> {
 fn collect_tmux_options(options: Vec<(String, String)>) -> HashMap<String, String> {
     options
         .into_iter()
+        .filter(|(_, value)| !value.is_empty())
         .filter_map(|(name, value)| {
             name.strip_prefix(TMUX_OPTION_PREFIX)
                 .map(|key| (key.to_string(), value))
