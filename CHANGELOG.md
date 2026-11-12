@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides before reading checkout metadata, reducing subprocess startup.
 
 ### Fixed
+- Native manager `--tmux` and `--no-tmux` options after the legacy `--`
+  separator are respected instead of being overridden by the default popup.
 - Buffer previews preserve leading and trailing spaces in names, so the
   preview uses the same buffer as paste even when a trimmed name also exists.
   The terminal regression checks content beyond the list summary.

@@ -1109,14 +1109,19 @@ fn native_popup_options(options: Vec<String>) -> Result<Vec<String>> {
     let mut height = None;
     let mut legacy_popup = false;
     let mut native_popup = false;
+    let mut fzf_options_only = false;
     let mut iter = options.into_iter().peekable();
     while let Some(option) = iter.next() {
         if option == "--" {
-            result.extend(iter);
-            break;
+            fzf_options_only = true;
+            continue;
         }
         if option == "--tmux" || option.starts_with("--tmux=") || option == "--no-tmux" {
             native_popup = true;
+        }
+        if fzf_options_only {
+            result.push(option);
+            continue;
         }
         let flag = match option.as_bytes() {
             [b'-', flag @ (b'p' | b'w' | b'h'), ..] => *flag,
@@ -1387,6 +1392,33 @@ mod tests {
         assert!(native_popup_options(vec!["-w".into()]).is_err());
         assert!(native_popup_options(vec!["-pbad".into()]).is_err());
         assert!(native_popup_options(vec!["-d".into(), "40%".into()]).is_err());
+    }
+
+    #[test]
+    fn preserves_native_popup_settings_after_separator() {
+        for options in [
+            vec!["--tmux=bottom,86%,58%"],
+            vec!["--tmux", "bottom,86%,58%"],
+            vec!["--tmux"],
+            vec!["--no-tmux"],
+            vec!["--tmux=bottom,86%,58%", "--no-tmux"],
+            vec!["--no-tmux", "--tmux=bottom,86%,58%"],
+        ] {
+            let expected: Vec<String> = options.into_iter().map(String::from).collect();
+            let options = std::iter::once("--".into())
+                .chain(expected.iter().cloned())
+                .collect();
+            assert_eq!(native_popup_options(options).unwrap(), expected);
+        }
+        // The separator still protects fzf flags from legacy layout parsing.
+        assert_eq!(
+            native_popup_options(vec!["--".into(), "--no-tmux".into(), "-h".into()]).unwrap(),
+            vec!["--no-tmux", "-h"]
+        );
+        assert_eq!(
+            native_popup_options(vec!["--".into(), "--ansi".into()]).unwrap(),
+            vec!["--ansi", "--tmux=center,62%,38%"]
+        );
     }
 
     #[test]

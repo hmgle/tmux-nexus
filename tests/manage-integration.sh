@@ -97,6 +97,23 @@ fi
 grep -Fq 'TNX_MANAGER_PREVIEW_WIDTH' "$TMP/width-error"
 tmux -L "$SOCKET" set-option -gu @tmux_nexus_manager_preview_width
 
+for layout in '--tmux=bottom,86%,58%' '--tmux bottom,86%,58%' '--tmux' '--no-tmux'; do
+    tmux -L "$SOCKET" set-option -g @tmux_nexus_manager_fzf_options "-- $layout"
+    TNX_TEST_FZF_EXIT=130 run_manage pane switch
+    case "$layout" in
+        '--tmux bottom,86%,58%')
+            grep -Fxq -- '--tmux' "$TMP/fzf-args"
+            grep -Fxq 'bottom,86%,58%' "$TMP/fzf-args"
+            ;;
+        *) grep -Fxq -- "$layout" "$TMP/fzf-args" ;;
+    esac
+    if grep -Fxq -- '--tmux=center,62%,38%' "$TMP/fzf-args"; then
+        echo "manager integration: default popup overrides an explicit layout" >&2
+        exit 1
+    fi
+done
+tmux -L "$SOCKET" set-option -gu @tmux_nexus_manager_fzf_options
+
 pane_remote="$(tmux -L "$SOCKET" split-window -d -t "$pane_one" -P -F '#{pane_id}' \
     "env -i /bin/sh -c 'printf \"\\033]7;file://remote.example/path%%20B\\033\\\\\"; sleep 60'")"
 sleep 0.2

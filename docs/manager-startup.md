@@ -14,6 +14,11 @@ Existing `-p -w 86% -h 58%` settings are translated to
 `--tmux=center,86%,58%` inside the manager. New configurations can use the native
 option directly.
 
+An optional legacy `--` separator ends `-p`/`-w`/`-h` translation. Native fzf
+layout options after it, such as `-- --tmux=bottom,86%,58%` or `-- --no-tmux`,
+are passed through without appending a default layout. Their order is preserved
+so fzf handles subsequent native overrides normally.
+
 fzf 0.60.3 is the supported and CI-tested release baseline. Older native-popup
 implementations can fail with `bad variable name` when the environment contains
 exported Bash functions (`BASH_FUNC_*%%`). Upstream fixed function export in
