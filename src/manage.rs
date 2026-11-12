@@ -16,10 +16,7 @@ use tempfile::NamedTempFile;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::{
-    tmux,
-    util::{shell_quote, version_at_least},
-};
+use crate::{tmux, util::shell_quote};
 
 mod clipboard;
 mod process;
@@ -85,7 +82,6 @@ struct ManagerContext {
 
 #[derive(Clone, Debug)]
 struct Picker {
-    program: &'static str,
     options: Vec<OsString>,
     preview_follow: bool,
     tmux_popup: bool,
@@ -127,6 +123,12 @@ struct PaneEntry {
     host: String,
 }
 
+struct PaneSnapshot {
+    panes: Vec<PaneEntry>,
+    current_session: String,
+    current_pane: String,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum PaneRemoteMode {
     #[default]
@@ -156,11 +158,6 @@ impl PaneRemoteMode {
             Self::Off => "off",
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum PreviewSpec<'a> {
-    Rows(&'a str),
 }
 
 pub fn run(args: ManageArgs) -> Result<()> {
@@ -227,7 +224,7 @@ impl ManagerConfig {
             env::var(env_name)
                 .ok()
                 .filter(|value| !value.is_empty())
-                .or_else(|| options.get(name).cloned())
+                .or_else(|| options.get(name).filter(|value| !value.is_empty()).cloned())
                 .or_else(|| env::var(legacy).ok().filter(|value| !value.is_empty()))
         };
         let boolean = |name: &str, env_name: &str, legacy: &str, default: bool| -> Result<bool> {
@@ -249,7 +246,7 @@ impl ManagerConfig {
         let menu = get("menu", "TNX_MANAGER_MENU", "TMUX_FZF_MENU");
         let key = env::var("TNX_MANAGER_KEY")
             .ok()
-            .or_else(|| tmux::show_option_allow_empty("@tmux_nexus_manager_key"))
+            .or_else(|| options.get("key").cloned())
             .or_else(|| env::var("TMUX_FZF_LAUNCH_KEY").ok())
             .unwrap_or_else(|| "F".into());
         if menu.is_some() && !order.iter().any(|item| item == "menu") {
@@ -259,7 +256,7 @@ impl ManagerConfig {
             key,
             order,
             fzf_options: get("fzf_options", "TNX_MANAGER_FZF_OPTIONS", "TMUX_FZF_OPTIONS")
-                .unwrap_or_else(|| "-p -w 62% -h 38%".into()),
+                .unwrap_or_else(|| "--tmux=center,62%,38%".into()),
             preview: boolean("preview", "TNX_MANAGER_PREVIEW", "TMUX_FZF_PREVIEW", true)?,
             preview_follow: boolean(
                 "preview_follow",
@@ -329,32 +326,19 @@ impl ManagerConfig {
 
 impl Picker {
     fn new(config: &ManagerConfig) -> Result<Self> {
-        let use_tmux = tmux::have("fzf-tmux") && env::var_os("TMUX").is_some();
-        let fzf_version = tmux::command_version("fzf", &["--version"]).unwrap_or_default();
-        let tmux_version = tmux::command_version("tmux", &["-V"]).unwrap_or_default();
-        let tmux_popup = version_at_least(&tmux_version, 3, 2, 0);
+        let tmux_popup = env::var_os("TMUX").is_some();
         let parsed = shell_words::split(&config.fzf_options)
             .context("failed to parse manager fzf options")?;
-        let options = if use_tmux {
-            let options = without_multi(parsed);
-            if tmux_popup && version_at_least(&fzf_version, 0, 23, 0) {
-                options
-            } else {
-                without_popup_options(options)
-            }
-        } else {
-            without_tmux_options(without_multi(parsed))
-        };
+        let options = native_popup_options(without_multi(parsed))?;
         Ok(Self {
-            program: if use_tmux { "fzf-tmux" } else { "fzf" },
             options: options.into_iter().map(OsString::from).collect(),
-            preview_follow: config.preview_follow && version_at_least(&fzf_version, 0, 24, 4),
+            preview_follow: config.preview_follow,
             tmux_popup,
         })
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(self.program);
+        let mut command = Command::new("fzf");
         command.args(&self.options);
         command
     }
@@ -709,7 +693,7 @@ fn parse_window_entry(line: &str) -> Option<WindowEntry> {
     })
 }
 
-fn pane_entries(config: &ManagerConfig) -> Result<Vec<PaneEntry>> {
+fn pane_snapshot(config: &ManagerConfig, client: &tmux::TmuxClient) -> Result<PaneSnapshot> {
     let display = config
         .pane_format
         .as_deref()
@@ -718,8 +702,23 @@ fn pane_entries(config: &ManagerConfig) -> Result<Vec<PaneEntry>> {
     let format = format!(
         "#{{session_id}}\t#{{window_id}}\t#{{pane_id}}\t#{{pane_path}}\t#{{host}}\t{display}"
     );
-    let output = tmux::stdout(["list-panes", "-a", "-F", format.as_str()])?;
-    Ok(output
+    let output = client.stdout([
+        "display-message",
+        "-p",
+        "#{session_id}\t#{pane_id}",
+        ";",
+        "list-panes",
+        "-a",
+        "-F",
+        format.as_str(),
+    ])?;
+    let (current, entries) = output
+        .split_once('\n')
+        .context("tmux returned no pane snapshot")?;
+    let (current_session, current_pane) = current
+        .split_once('\t')
+        .context("tmux returned invalid current pane identifiers")?;
+    let panes = entries
         .lines()
         .filter_map(parse_pane_entry)
         .map(|mut pane| {
@@ -732,7 +731,12 @@ fn pane_entries(config: &ManagerConfig) -> Result<Vec<PaneEntry>> {
             }
             pane
         })
-        .collect())
+        .collect();
+    Ok(PaneSnapshot {
+        panes,
+        current_session: current_session.to_string(),
+        current_pane: current_pane.to_string(),
+    })
 }
 
 fn parse_pane_entry(line: &str) -> Option<PaneEntry> {
@@ -928,30 +932,13 @@ fn choose(
     multi: bool,
     preview_kind: Option<&str>,
 ) -> Result<Vec<usize>> {
-    choose_with_preview(
-        rows,
-        context,
-        prompt,
-        header,
-        multi,
-        preview_kind.map(PreviewSpec::Rows),
-    )
-}
-
-fn choose_with_preview(
-    rows: &[Row],
-    context: &ManagerContext,
-    prompt: &str,
-    header: &str,
-    multi: bool,
-    preview_spec: Option<PreviewSpec<'_>>,
-) -> Result<Vec<usize>> {
     if rows.is_empty() {
         tmux::display_message("tmux-nexus: no manager items available");
         return Ok(Vec::new());
     }
     let config = &context.config;
-    let mut data = matches!(preview_spec, Some(PreviewSpec::Rows(_)))
+    let direct_pane_preview = preview_kind == Some("pane");
+    let mut data = (preview_kind.is_some() && !direct_pane_preview)
         .then(NamedTempFile::new)
         .transpose()?;
     if let Some(data) = data.as_mut() {
@@ -963,7 +950,7 @@ fn choose_with_preview(
         "--delimiter",
         "\t",
         "--with-nth",
-        "2..",
+        if direct_pane_preview { "3.." } else { "2.." },
         "--layout=reverse",
         "--info=inline",
         "--tiebreak=index",
@@ -973,20 +960,24 @@ fn choose_with_preview(
         header,
     ]);
     command.arg(if multi { "-m" } else { "+m" });
-    if let Some(preview_spec) = preview_spec {
-        let exe = env::current_exe()?;
-        let preview = match preview_spec {
-            PreviewSpec::Rows(kind) => {
-                let data = data
-                    .as_ref()
-                    .context("manager preview data is unavailable")?;
-                format!(
-                    "{} manage-preview --kind {} --data {} --row {{1}}",
-                    shell_quote(&exe.to_string_lossy()),
-                    shell_quote(kind),
-                    shell_quote(&data.path().to_string_lossy())
-                )
-            }
+    if let Some(kind) = preview_kind {
+        let preview = if direct_pane_preview {
+            // {2} is quoted by fzf. Preserve the exact tmux socket arguments.
+            format!(
+                "{} {{2}}",
+                context.tmux.shell_command(["capture-pane", "-ep", "-t"])
+            )
+        } else {
+            let exe = env::current_exe()?;
+            let data = data
+                .as_ref()
+                .context("manager preview data is unavailable")?;
+            format!(
+                "{} manage-preview --kind {} --data {} --row {{1}}",
+                shell_quote(&exe.to_string_lossy()),
+                shell_quote(kind),
+                shell_quote(&data.path().to_string_lossy())
+            )
         };
         let follow = if context.picker.preview_follow {
             ":follow"
@@ -1005,7 +996,11 @@ fn choose_with_preview(
     let mut child = command.spawn().context("failed to start manager fzf")?;
     if let Some(stdin) = child.stdin.as_mut() {
         for (index, row) in rows.iter().enumerate() {
-            let result = writeln!(stdin, "{}\t{}", index, sanitize(&row.display));
+            let result = if direct_pane_preview {
+                writeln!(stdin, "{}\t{}\t{}", index, row.id, sanitize(&row.display))
+            } else {
+                writeln!(stdin, "{}\t{}", index, sanitize(&row.display))
+            };
             if let Err(error) = result {
                 if error.kind() != ErrorKind::BrokenPipe {
                     return Err(error.into());
@@ -1081,73 +1076,73 @@ fn is_multi_option(option: &str) -> bool {
         .is_some_and(|count| !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-fn without_tmux_options(options: Vec<String>) -> Vec<String> {
-    without_layout_options(options, true, false)
-}
-
-fn without_popup_options(options: Vec<String>) -> Vec<String> {
-    without_layout_options(options, false, true)
-}
-
-fn without_layout_options(
-    options: Vec<String>,
-    include_split: bool,
-    preserve_separator: bool,
-) -> Vec<String> {
+// Translate the existing popup size settings once, in process. fzf owns the
+// popup and its input/output forwarding; no fzf-tmux shell wrapper is needed.
+fn native_popup_options(options: Vec<String>) -> Result<Vec<String>> {
     let mut result = Vec::new();
-    let mut iter = options.into_iter();
+    let mut width = "62%".to_string();
+    let mut height = "38%".to_string();
+    let mut legacy_popup = false;
+    let mut native_popup = false;
+    let mut iter = options.into_iter().peekable();
     while let Some(option) = iter.next() {
         if option == "--" {
-            if preserve_separator {
-                result.push(option);
-            }
             result.extend(iter);
             break;
         }
-        if is_tmux_layout_option(&option, include_split) {
-            if tmux_layout_option_takes_value(&option)
-                && iter
-                    .as_slice()
-                    .first()
-                    .is_some_and(|value| is_tmux_layout_value(value))
-            {
-                let _ = iter.next();
-            }
-            continue;
+        if option == "--tmux" || option.starts_with("--tmux=") || option == "--no-tmux" {
+            native_popup = true;
         }
-        result.push(option);
+        let flag = match option.as_bytes() {
+            [b'-', flag @ (b'p' | b'w' | b'h'), ..] => *flag,
+            _ => {
+                if matches!(option.as_str(), "-x" | "-y" | "-d" | "-u" | "-l" | "-r") {
+                    anyhow::bail!("manager uses native fzf popups; use --tmux=POSITION,WIDTH,HEIGHT instead of {option}");
+                }
+                result.push(option);
+                continue;
+            }
+        };
+        legacy_popup = true;
+        let value = if option.len() > 2 {
+            Some(option[2..].to_string())
+        } else if iter
+            .peek()
+            .is_some_and(|value| value.starts_with(|character: char| character.is_ascii_digit()))
+        {
+            iter.next()
+        } else {
+            None
+        };
+        if flag == b'p' {
+            // fzf-tmux -p defaults to a square 50% popup; one size sets both.
+            let value = value.unwrap_or_else(|| "50%".into());
+            let (w, h) = value.split_once(',').unwrap_or((&value, &value));
+            width = w.to_string();
+            height = h.to_string();
+        } else {
+            let value = value.with_context(|| format!("missing popup size for {option}"))?;
+            if flag == b'w' {
+                width = value;
+            } else {
+                height = value;
+            }
+        }
     }
-    result
-}
-
-fn is_tmux_layout_option(option: &str, include_split: bool) -> bool {
-    if option == "--popup" || option.starts_with("--popup=") {
-        return true;
+    if legacy_popup && native_popup {
+        anyhow::bail!("use either --tmux or -p/-w/-h for manager popup settings");
     }
-    let Some(flag) = option
-        .strip_prefix('-')
-        .and_then(|value| value.chars().next())
-    else {
-        return false;
-    };
-    matches!(flag, 'p' | 'w' | 'h' | 'x' | 'y')
-        || (include_split && matches!(flag, 'd' | 'u' | 'l' | 'r'))
-}
-
-fn tmux_layout_option_takes_value(option: &str) -> bool {
-    option == "--popup"
-        || matches!(
-            option,
-            "-p" | "-w" | "-h" | "-x" | "-y" | "-d" | "-u" | "-l" | "-r"
-        )
-}
-
-fn is_tmux_layout_value(value: &str) -> bool {
-    !value.is_empty()
-        && (value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'%' | b','))
-            || (value.len() == 1 && value.as_bytes()[0].is_ascii_uppercase()))
+    if !native_popup {
+        for size in [&width, &height] {
+            let digits = size.strip_suffix('%').unwrap_or(size);
+            anyhow::ensure!(
+                !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()),
+                "invalid manager popup size '{size}'"
+            );
+        }
+        result.push(format!("--tmux=center,{width},{height}"));
+    }
+    Ok(result)
 }
 
 fn destructive_tmux(
@@ -1268,9 +1263,9 @@ fn ensure_program(program: &str, message: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_bool, parse_menu, parse_pane_entry, parse_session_entry, parse_window_entry,
-        percent_decode, picker_exit, render_pane_context, truncate_display, without_multi,
-        without_popup_options, without_tmux_options, PaneRemoteMode, PickerExit,
+        native_popup_options, parse_bool, parse_menu, parse_pane_entry, parse_session_entry,
+        parse_window_entry, percent_decode, picker_exit, render_pane_context, truncate_display,
+        without_multi, PaneRemoteMode, PickerExit,
     };
 
     #[test]
@@ -1294,35 +1289,35 @@ mod tests {
     }
 
     #[test]
-    fn strips_popup_options_for_plain_fzf() {
+    fn translates_existing_manager_popup_sizes() {
+        for options in [
+            vec!["-p", "-w", "86%", "-h", "58%", "--ansi"],
+            vec!["-p86%,58%", "--ansi"],
+            vec!["-w86%", "-h58%", "--ansi"],
+        ] {
+            assert_eq!(
+                native_popup_options(options.into_iter().map(String::from).collect()).unwrap(),
+                vec!["--ansi", "--tmux=center,86%,58%"]
+            );
+        }
         assert_eq!(
-            without_tmux_options(vec![
-                "-p".into(),
-                "80%,60%".into(),
-                "-w80%".into(),
-                "-d".into(),
-                "40%".into(),
-                "--".into(),
-                "--ansi".into()
-            ]),
-            vec!["--ansi"]
+            native_popup_options(vec!["-p80%".into()]).unwrap(),
+            vec!["--tmux=center,80%,80%"]
+        );
+        assert_eq!(
+            native_popup_options(vec![]).unwrap(),
+            vec!["--tmux=center,62%,38%"]
         );
     }
 
     #[test]
-    fn keeps_split_options_when_popup_is_unsupported() {
-        assert_eq!(
-            without_popup_options(vec![
-                "-p80%,60%".into(),
-                "-w".into(),
-                "80%".into(),
-                "-d".into(),
-                "40%".into(),
-                "--".into(),
-                "-p".into(),
-            ]),
-            vec!["-d", "40%", "--", "-p"]
-        );
+    fn preserves_native_popup_settings() {
+        let options = vec!["--tmux=bottom,90%,40%".into(), "--ansi".into()];
+        assert_eq!(native_popup_options(options.clone()).unwrap(), options);
+        assert!(native_popup_options(vec!["-p".into(), "--tmux".into()]).is_err());
+        assert!(native_popup_options(vec!["-w".into()]).is_err());
+        assert!(native_popup_options(vec!["-pbad".into()]).is_err());
+        assert!(native_popup_options(vec!["-d".into(), "40%".into()]).is_err());
     }
 
     #[test]

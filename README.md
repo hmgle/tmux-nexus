@@ -13,12 +13,12 @@ a local build or installs a checksum-verified release binary when needed.
 
 ## Requirements
 
-- `tmux` 3.2+ recommended.
-- `fzf` for the interactive picker.
+- `tmux` 3.3+ and `fzf` 0.53+ for native manager popups.
 - `curl` or `wget` to download the prebuilt backend (only on first run). No Rust
   toolchain is required to use the plugin; install one only to build from source.
-- Optional: `fzf-tmux` for popup rendering, `rg` for user workflows, and one
-  clipboard helper (`pbcopy`, `wl-copy`, `xclip`, `xsel`, or `clip.exe`).
+- Optional: `fzf-tmux` for history-search popup rendering, `rg` for user
+  workflows, and one clipboard helper (`pbcopy`, `wl-copy`, `xclip`, `xsel`,
+  or `clip.exe`).
 - Optional manager integrations: `copyq` for system clipboard history and
   `pstree` for process trees. Without CopyQ, the manager uses tmux buffers.
 
@@ -166,7 +166,7 @@ set -g @tmux_nexus_motion_key "s"
 set -g @tmux_nexus_motion2_key "S"
 set -g @tmux_nexus_motion_hints "asdghklqwertyuiopzxcvbnmfj;"
 set -g @tmux_nexus_manager_key "F"
-set -g @tmux_nexus_manager_fzf_options "-p -w 62% -h 38% -m"
+set -g @tmux_nexus_manager_fzf_options "--tmux=center,62%,38%"
 set -g @tmux_nexus_manager_confirm "1"
 ```
 
@@ -212,7 +212,7 @@ Manager settings use `@tmux_nexus_manager_*` tmux options or
 | --- | --- | --- |
 | `key` | `F` | tmux prefix binding; set it to an empty value to disable |
 | `order` | `history|copy-mode|session|window|pane|command|keybinding|clipboard|process` | category order and visibility |
-| `fzf_options` | `-p -w 62% -h 38%` | fzf-tmux popup/layout options |
+| `fzf_options` | `--tmux=center,62%,38%` | native fzf popup and picker options |
 | `preview`, `preview_follow` | `1`, `1` | preview visibility and follow mode |
 | `confirm` | `1` | confirm destructive actions |
 | `switch_current` | `0` | include the current object in switch lists |
@@ -366,13 +366,19 @@ Remove `set -g @plugin 'sainnhe/tmux-fzf'`, keep the manager binding at its
 default `Prefix+F`, and translate persistent configuration as follows:
 
 ```tmux
-set -g @tmux_nexus_manager_fzf_options "-p -w 86% -h 58% -m"
+set -g @tmux_nexus_manager_fzf_options "--tmux=center,86%,58%"
 set -g @tmux_nexus_manager_pane_format \
   "#{b:pane_current_path} #{=/-26/...:#{d:pane_current_path}} [#{pane_current_command}]"
 ```
 
 Legacy environment variables remain supported, but the tmux options above are
 preferred for new configurations.
+
+The manager calls fzf's native `--tmux` popup directly. Existing `-p`, `-w`,
+and `-h` sizes are translated in process; split layouts and explicit `-x`/`-y`
+coordinates should use native `--tmux=POSITION,WIDTH,HEIGHT` settings instead.
+Pane previews call `tmux capture-pane` directly without a temporary row snapshot
+or an intermediate `tnx` process.
 
 CLI flags override configuration for that run.
 

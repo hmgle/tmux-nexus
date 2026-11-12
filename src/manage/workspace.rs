@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 
 use super::{
-    choose, client_switch_commands, command, destructive_tmux, pane_entries, prompt_text,
+    choose, client_switch_commands, command, destructive_tmux, pane_snapshot, prompt_text,
     resolve_action, rows, selected_rows, session_entries, window_entries, ManagerContext,
-    PaneEntry, Row, SessionEntry, WindowEntry,
+    PaneEntry, PaneSnapshot, Row, SessionEntry, WindowEntry,
 };
 use crate::tmux;
 
@@ -248,14 +248,11 @@ pub(super) fn run_pane(action: Option<&str>, context: &ManagerContext) -> Result
     if action == "resize" {
         return resize_pane(context);
     }
-    let mut panes = pane_entries(config)?;
-    let current = context
-        .tmux
-        .stdout(["display-message", "-p", "#{session_id}\t#{pane_id}"])?;
-    let (current_session, current_pane) = current
-        .trim_end()
-        .split_once('\t')
-        .context("tmux returned invalid current pane identifiers")?;
+    let PaneSnapshot {
+        mut panes,
+        current_session,
+        current_pane,
+    } = pane_snapshot(config, &context.tmux)?;
     if action == "join" || (action == "switch" && !config.switch_current) {
         panes.retain(|pane| pane.pane_id != current_pane);
     }
@@ -300,7 +297,15 @@ pub(super) fn run_pane(action: Option<&str>, context: &ManagerContext) -> Result
         "join" => {
             let commands = selected
                 .iter()
-                .map(|pane| command(["move-pane", "-s", pane.pane_id.as_str(), "-t", current_pane]))
+                .map(|pane| {
+                    command([
+                        "move-pane",
+                        "-s",
+                        pane.pane_id.as_str(),
+                        "-t",
+                        current_pane.as_str(),
+                    ])
+                })
                 .collect::<Vec<_>>();
             client.run_commands(&commands)
         }

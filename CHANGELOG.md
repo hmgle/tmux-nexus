@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Manager pickers use native fzf popups (tmux 3.3+ and fzf 0.53+), removing
+  the fzf-tmux shell wrapper and per-launch version probes. Existing `-p`/`-w`/
+  `-h` popup sizes are translated to `--tmux` options.
+- Pane previews run `tmux capture-pane` directly, avoiding temporary JSON files
+  and intermediate tnx processes. Startup reuses the configuration snapshot and
+  batches pane enumeration with the current-pane query.
+
 ### Fixed
 - The documented zsh OSC 7 hook retries interrupted and partial terminal writes,
   isolates path encoding from shell options, and refreshes its functions on
