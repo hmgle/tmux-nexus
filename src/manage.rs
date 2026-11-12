@@ -1086,8 +1086,8 @@ fn is_multi_option(option: &str) -> bool {
 // popup and its input/output forwarding; no fzf-tmux shell wrapper is needed.
 fn native_popup_options(options: Vec<String>) -> Result<Vec<String>> {
     let mut result = Vec::new();
-    let mut width = "62%".to_string();
-    let mut height = "38%".to_string();
+    let mut width = None;
+    let mut height = None;
     let mut legacy_popup = false;
     let mut native_popup = false;
     let mut iter = options.into_iter().peekable();
@@ -1121,17 +1121,18 @@ fn native_popup_options(options: Vec<String>) -> Result<Vec<String>> {
             None
         };
         if flag == b'p' {
-            // fzf-tmux -p defaults to a square 50% popup; one size sets both.
-            let value = value.unwrap_or_else(|| "50%".into());
-            let (w, h) = value.split_once(',').unwrap_or((&value, &value));
-            width = w.to_string();
-            height = h.to_string();
+            // A bare -p enables the popup without changing earlier sizes.
+            if let Some(value) = value {
+                let (w, h) = value.split_once(',').unwrap_or((&value, &value));
+                width = Some(w.to_string());
+                height = Some(h.to_string());
+            }
         } else {
             let value = value.with_context(|| format!("missing popup size for {option}"))?;
             if flag == b'w' {
-                width = value;
+                width = Some(value);
             } else {
-                height = value;
+                height = Some(value);
             }
         }
     }
@@ -1139,7 +1140,13 @@ fn native_popup_options(options: Vec<String>) -> Result<Vec<String>> {
         anyhow::bail!("use either --tmux or -p/-w/-h for manager popup settings");
     }
     if !native_popup {
-        for size in [&width, &height] {
+        let width = width
+            .as_deref()
+            .unwrap_or(if legacy_popup { "50%" } else { "62%" });
+        let height = height
+            .as_deref()
+            .unwrap_or(if legacy_popup { "50%" } else { "38%" });
+        for size in [width, height] {
             let digits = size.strip_suffix('%').unwrap_or(size);
             anyhow::ensure!(
                 !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()),
@@ -1322,7 +1329,10 @@ mod tests {
     fn translates_existing_manager_popup_sizes() {
         for options in [
             vec!["-p", "-w", "86%", "-h", "58%", "--ansi"],
+            vec!["-w86%", "-h58%", "-p", "--ansi"],
+            vec!["-w", "86%", "-p", "-h", "58%", "-p", "--ansi"],
             vec!["-p86%,58%", "--ansi"],
+            vec!["-p86%,58%", "-p", "--ansi"],
             vec!["-w86%", "-h58%", "--ansi"],
         ] {
             assert_eq!(
@@ -1334,6 +1344,16 @@ mod tests {
             native_popup_options(vec!["-p80%".into()]).unwrap(),
             vec!["--tmux=center,80%,80%"]
         );
+        for (options, expected) in [
+            (vec!["-p"], "--tmux=center,50%,50%"),
+            (vec!["-w86%", "-p"], "--tmux=center,86%,50%"),
+            (vec!["-p", "-h58%"], "--tmux=center,50%,58%"),
+        ] {
+            assert_eq!(
+                native_popup_options(options.into_iter().map(String::from).collect()).unwrap(),
+                vec![expected]
+            );
+        }
         assert_eq!(
             native_popup_options(vec![]).unwrap(),
             vec!["--tmux=center,62%,38%"]

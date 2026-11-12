@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides before reading checkout metadata, reducing subprocess startup.
 
 ### Fixed
+- A bare manager `-p` popup option preserves sizes configured before it,
+  including partially specified dimensions.
 - The documented zsh OSC 7 hook retries interrupted and partial terminal writes,
   isolates path encoding from shell options, and refreshes its functions on
   reload. It skips redirected output and unregisters itself if `zsh/system`
